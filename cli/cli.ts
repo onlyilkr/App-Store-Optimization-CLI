@@ -1,0 +1,85 @@
+#!/usr/bin/env node
+import "./load-env";
+import "./services/telemetry/instrument";
+
+import yargs from "yargs";
+import { hideBin } from "yargs/helpers";
+import { logger, processNestedErrors } from "./utils/logger";
+import path from "path";
+import asoCmd from "./commands/aso";
+import { checkVersionUpdateSync } from "./services/runtime/version-check-service";
+import { reportBugsnagError } from "./services/telemetry/error-reporter";
+import { assertSupportedNodeVersion } from "./services/runtime/node-version-guard";
+import {
+  emitStdoutRuntimeFailure,
+  emitStdoutValidationFailure,
+  isStdoutKeywordsRun,
+  toMachineReadableErrorMessage,
+} from "./services/runtime/stdout-contract";
+
+assertSupportedNodeVersion();
+const processArgs = process.argv?.slice(2) || [];
+const stdoutKeywordsRun = isStdoutKeywordsRun(processArgs);
+
+const isDebugEnabled = process.env.NODE_ENV == "development";
+
+if (isDebugEnabled) {
+  const logFilePath = path.resolve(process.cwd(), "aso-debug.log");
+  logger.setOutputModes([{ mode: "file", showErrorStack: true }], logFilePath);
+  logger.setLevel("debug");
+  logger.debug(`Debug logging enabled. File: ${logFilePath}`);
+} else {
+  logger.setOutputModes([{ mode: "console", showErrorStack: false }]);
+  logger.setLevel("info");
+}
+
+async function main() {
+  checkVersionUpdateSync({ allowStdoutMessage: !stdoutKeywordsRun });
+
+  const parser = yargs(hideBin(process.argv))
+    .command(asoCmd)
+    .strict()
+    .fail(async (msg, err) => {
+      const failureMessage =
+        (typeof msg === "string" && msg.trim()) ||
+        toMachineReadableErrorMessage(err);
+      if (stdoutKeywordsRun) {
+        emitStdoutValidationFailure(failureMessage);
+      } else {
+        logger.error(
+          failureMessage,
+          "Use 'aso --help' to see available commands and options."
+        );
+      }
+      process.exit(1);
+    })
+    .help();
+
+  await parser.parseAsync();
+}
+
+main().catch((err) => {
+  let command = "unknown";
+
+  try {
+    command = processArgs[0] || "unknown";
+  } catch {
+    command = "unknown";
+  }
+
+  const processedError = processNestedErrors(err, false);
+
+  if (stdoutKeywordsRun) {
+    emitStdoutRuntimeFailure(toMachineReadableErrorMessage(processedError));
+  } else {
+    logger.error(`Command '${command}' failed`, processedError);
+  }
+  reportBugsnagError(err, {
+    surface: "aso-cli",
+    source: "cli.main.catch",
+    operation: `command:${command}`,
+    command,
+    context: processedError,
+  });
+  process.exitCode = 1;
+});

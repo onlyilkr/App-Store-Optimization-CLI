@@ -1,0 +1,565 @@
+import { beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { logger } from "../utils/logger";
+
+jest.mock("../services/keywords/keyword-pipeline-service", () => ({
+  keywordPipelineService: {
+    parseKeywords: jest.fn(),
+    run: jest.fn(),
+  },
+}));
+
+jest.mock("../dashboard-server", () => ({
+  startDashboard: jest.fn(),
+}));
+
+jest.mock("../services/auth/aso-keychain-service", () => ({
+  asoKeychainService: {
+    clearCredentials: jest.fn(),
+  },
+}));
+
+jest.mock("../services/auth/aso-cookie-store-service", () => ({
+  asoCookieStoreService: {
+    clearCookies: jest.fn(),
+  },
+}));
+
+jest.mock("../services/keywords/aso-adam-id-service", () => ({
+  resolveAsoAdamId: jest.fn(),
+}));
+
+jest.mock("../services/auth/aso-auth-service", () => ({
+  asoAuthService: {
+    reAuthenticate: jest.fn(),
+  },
+}));
+
+jest.mock("../services/keywords/aso-research-keyword-service", () => ({
+  saveKeywordsToResearchApp: jest.fn(),
+}));
+
+jest.mock("../services/backend/aso-backend-api-key-service", () => ({
+  asoBackendApiKeyService: {
+    setApiKey: jest.fn(),
+    clearApiKey: jest.fn(),
+    getStatus: jest.fn(() => ({ source: "none", maskedKey: null })),
+  },
+}));
+
+jest.mock("../services/backend/aso-backend-client", () => ({
+  asoBackendClient: {
+    isDifficultyEntitled: jest.fn(async () => true),
+    invalidateContextCache: jest.fn(),
+  },
+}));
+
+jest.mock("../utils/logger", () => ({
+  logger: {
+    debug: jest.fn(),
+    info: jest.fn(),
+  },
+}));
+
+import asoCommand from "./aso";
+import { keywordPipelineService } from "../services/keywords/keyword-pipeline-service";
+import { startDashboard } from "../dashboard-server";
+import { asoKeychainService } from "../services/auth/aso-keychain-service";
+import { asoCookieStoreService } from "../services/auth/aso-cookie-store-service";
+import { resolveAsoAdamId } from "../services/keywords/aso-adam-id-service";
+import { asoAuthService } from "../services/auth/aso-auth-service";
+import { saveKeywordsToResearchApp } from "../services/keywords/aso-research-keyword-service";
+import { asoBackendClient } from "../services/backend/aso-backend-client";
+import { asoBackendApiKeyService } from "../services/backend/aso-backend-api-key-service";
+import yargs from "yargs/yargs";
+
+const STDOUT_INTERACTIVE_AUTH_REQUIRED_MESSAGE =
+  "This run needs interactive Apple Search Ads reauthentication. Run 'aso auth' in a terminal, then retry this command with --stdout.";
+
+describe("aso command", () => {
+  const mockLogger = jest.mocked(logger);
+  const consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.mocked(keywordPipelineService.parseKeywords).mockReturnValue([]);
+    jest.mocked(keywordPipelineService.run).mockResolvedValue({
+      items: [],
+      failedKeywords: [],
+      filteredOut: [],
+    } as any);
+    jest.mocked(resolveAsoAdamId).mockResolvedValue("1234567890");
+    jest.mocked(saveKeywordsToResearchApp).mockReturnValue(0);
+    jest.mocked(asoAuthService.reAuthenticate).mockResolvedValue("cookie=value");
+    jest.mocked(asoBackendClient.isDifficultyEntitled).mockResolvedValue(true);
+  });
+
+  it("starts dashboard when no keywords are provided", async () => {
+    await asoCommand.handler?.({
+      country: "US",
+      terms: undefined,
+    } as any);
+
+    expect(startDashboard).toHaveBeenCalledWith(true);
+    expect(resolveAsoAdamId).toHaveBeenCalledWith({
+      adamId: undefined,
+      allowPrompt: true,
+    });
+    expect(keywordPipelineService.run).not.toHaveBeenCalled();
+  });
+
+  it("resets saved ASO auth state with reset-credentials subcommand", async () => {
+    await asoCommand.handler?.({
+      subcommand: "reset-credentials",
+    } as any);
+
+    expect(asoKeychainService.clearCredentials).toHaveBeenCalledTimes(1);
+    expect(asoCookieStoreService.clearCookies).toHaveBeenCalledTimes(1);
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      "Reset ASO credentials/cookies."
+    );
+    expect(startDashboard).not.toHaveBeenCalled();
+    expect(keywordPipelineService.run).not.toHaveBeenCalled();
+    expect(resolveAsoAdamId).not.toHaveBeenCalled();
+  });
+
+  it("fetches keywords in `aso keywords` mode and persists requested keywords when no filters", async () => {
+    jest.mocked(keywordPipelineService.parseKeywords).mockReturnValue(["term"]);
+    jest.mocked(keywordPipelineService.run).mockResolvedValue({
+      items: [{ keyword: "term", popularity: 42 } as any],
+      failedKeywords: [],
+      filteredOut: [],
+    } as any);
+    jest.mocked(saveKeywordsToResearchApp).mockReturnValue(1);
+
+    await asoCommand.handler?.({
+      subcommand: "keywords",
+      country: "US",
+      terms: "term",
+    } as any);
+
+    expect(keywordPipelineService.run).toHaveBeenCalledWith("US", ["term"], {
+      filters: {
+        minPopularity: undefined,
+        maxDifficulty: undefined,
+      },
+    });
+    expect(resolveAsoAdamId).toHaveBeenCalledWith({
+      adamId: undefined,
+      allowPrompt: true,
+    });
+    expect(saveKeywordsToResearchApp).toHaveBeenCalledWith(
+      ["term"],
+      "US",
+      undefined
+    );
+    expect(startDashboard).not.toHaveBeenCalled();
+  });
+
+  it("persists only accepted keywords when filters are active", async () => {
+    jest.mocked(keywordPipelineService.parseKeywords).mockReturnValue([
+      "term",
+      "too-hard",
+    ]);
+    jest.mocked(keywordPipelineService.run).mockResolvedValue({
+      items: [{ keyword: "term", popularity: 42, difficultyScore: 20 } as any],
+      failedKeywords: [],
+      filteredOut: [{ keyword: "too-hard", reason: "high_difficulty" }],
+    } as any);
+
+    await asoCommand.handler?.({
+      subcommand: "keywords",
+      country: "US",
+      terms: "term,too-hard",
+      "min-popularity": 10,
+      "max-difficulty": 30,
+    } as any);
+
+    expect(keywordPipelineService.run).toHaveBeenCalledWith("US", ["term", "too-hard"], {
+      filters: {
+        minPopularity: 10,
+        maxDifficulty: 30,
+      },
+    });
+    expect(saveKeywordsToResearchApp).toHaveBeenCalledWith(
+      ["term"],
+      "US",
+      undefined
+    );
+  });
+
+  it("does not save requested keywords when command ends with all-keywords-failed error and no filters", async () => {
+    jest.mocked(keywordPipelineService.parseKeywords).mockReturnValue(["failed-term"]);
+    jest
+      .mocked(keywordPipelineService.run)
+      .mockRejectedValue(new Error("All keywords failed (1): failed-term:FAILED(500)"));
+
+    await expect(
+      asoCommand.handler?.({
+        subcommand: "keywords",
+        country: "US",
+        terms: "failed-term",
+      } as any)
+    ).rejects.toThrow("All keywords failed");
+
+    expect(saveKeywordsToResearchApp).not.toHaveBeenCalled();
+  });
+
+  it("does not save requested keywords on all-keywords-failed when filters are active", async () => {
+    jest.mocked(keywordPipelineService.parseKeywords).mockReturnValue(["failed-term"]);
+    jest
+      .mocked(keywordPipelineService.run)
+      .mockRejectedValue(new Error("All keywords failed (1): failed-term:FAILED(500)"));
+
+    await expect(
+      asoCommand.handler?.({
+        subcommand: "keywords",
+        country: "US",
+        terms: "failed-term",
+        "min-popularity": 10,
+      } as any)
+    ).rejects.toThrow("All keywords failed");
+
+    expect(saveKeywordsToResearchApp).not.toHaveBeenCalled();
+  });
+
+  it("saves provided primary app id and reuses it for this run", async () => {
+    await asoCommand.handler?.({
+      country: "US",
+      terms: undefined,
+      "primary-app-id": "555666777",
+    } as any);
+
+    expect(resolveAsoAdamId).toHaveBeenCalledWith({
+      adamId: "555666777",
+      allowPrompt: true,
+    });
+    expect(startDashboard).toHaveBeenCalledWith(true);
+  });
+
+  it("runs `aso auth` subcommand and only performs reauthentication", async () => {
+    await asoCommand.handler?.({
+      subcommand: "auth",
+    } as any);
+
+    expect(asoAuthService.reAuthenticate).toHaveBeenCalledTimes(1);
+    expect(resolveAsoAdamId).not.toHaveBeenCalled();
+    expect(startDashboard).not.toHaveBeenCalled();
+    expect(keywordPipelineService.run).not.toHaveBeenCalled();
+  });
+
+  it("sets API key and invalidates context cache", async () => {
+    await asoCommand.handler?.({
+      subcommand: "api-key",
+      terms: "set",
+      subcommandValue: "key-123",
+    } as any);
+
+    expect(asoBackendApiKeyService.setApiKey).toHaveBeenCalledWith("key-123");
+    expect(asoBackendClient.invalidateContextCache).toHaveBeenCalledTimes(1);
+  });
+
+  it("parses `aso api-key set <key>` via yargs positional routing", async () => {
+    await yargs(["api-key", "set", "key-abc"])
+      .command(asoCommand)
+      .strict()
+      .exitProcess(false)
+      .parseAsync();
+
+    expect(asoBackendApiKeyService.setApiKey).toHaveBeenCalledWith("key-abc");
+    expect(asoBackendClient.invalidateContextCache).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails fast when --stdout is used without keyword terms in keywords mode", async () => {
+    await expect(
+      asoCommand.handler?.({
+        subcommand: "keywords",
+        country: "US",
+        stdout: true,
+        terms: undefined,
+      } as any)
+    ).rejects.toThrow(
+      "`aso keywords` requires a comma-separated keyword argument."
+    );
+
+    expect(resolveAsoAdamId).not.toHaveBeenCalled();
+    expect(keywordPipelineService.run).not.toHaveBeenCalled();
+  });
+
+  it("fails fast when more than 100 keywords are provided", async () => {
+    const tooManyKeywords = Array.from({ length: 101 }, (_, index) => `term-${index}`);
+    jest.mocked(keywordPipelineService.parseKeywords).mockReturnValue(tooManyKeywords);
+
+    await expect(
+      asoCommand.handler?.({
+        subcommand: "keywords",
+        country: "US",
+        terms: tooManyKeywords.join(","),
+      } as any)
+    ).rejects.toThrow("A maximum of 100 keywords is supported per call");
+
+    expect(resolveAsoAdamId).not.toHaveBeenCalled();
+    expect(keywordPipelineService.run).not.toHaveBeenCalled();
+  });
+
+  it("rejects keyword flags on dashboard command", async () => {
+    await expect(
+      asoCommand.handler?.({
+        country: "US",
+        associate: false,
+      } as any)
+    ).rejects.toThrow(
+      "Keyword options are only supported in `aso keywords`."
+    );
+  });
+
+  it("uses non-interactive keyword fetch in --stdout mode and prints JSON", async () => {
+    const result = {
+      items: [{ keyword: "term", popularity: 42 }],
+      failedKeywords: [],
+      filteredOut: [],
+    };
+    jest.mocked(keywordPipelineService.parseKeywords).mockReturnValue(["term"]);
+    jest.mocked(keywordPipelineService.run).mockResolvedValue(result as any);
+
+    await asoCommand.handler?.({
+      subcommand: "keywords",
+      country: "US",
+      stdout: true,
+      terms: "term",
+      "min-popularity": 12,
+      "max-difficulty": 33,
+    } as any);
+
+    expect(keywordPipelineService.run).toHaveBeenCalledWith("US", ["term"], {
+      allowInteractiveAuthRecovery: false,
+      filters: {
+        minPopularity: 12,
+        maxDifficulty: 33,
+      },
+    });
+    expect(resolveAsoAdamId).toHaveBeenCalledWith({
+      adamId: undefined,
+      allowPrompt: false,
+    });
+    expect(saveKeywordsToResearchApp).toHaveBeenCalledWith(
+      ["term"],
+      "US",
+      undefined
+    );
+    expect(mockLogger.info).not.toHaveBeenCalled();
+    expect(mockLogger.debug).not.toHaveBeenCalled();
+    expect(consoleLogSpy).toHaveBeenCalledWith(JSON.stringify(result, null, 2));
+    expect(asoAuthService.reAuthenticate).not.toHaveBeenCalled();
+  });
+
+  it("strips internal item fields from --stdout payload", async () => {
+    jest.mocked(keywordPipelineService.parseKeywords).mockReturnValue(["term"]);
+    jest.mocked(keywordPipelineService.run).mockResolvedValue({
+      items: [
+        {
+          keyword: "term",
+          popularity: 42,
+          difficultyScore: 22,
+          difficultyState: "ready",
+          appCount: 99,
+          orderedAppIds: ["1", "2"],
+          orderExpiresAt: "2099-01-01T00:00:00.000Z",
+          popularityExpiresAt: "2099-02-01T00:00:00.000Z",
+          updatedAt: "2099-01-01T00:00:00.000Z",
+          appDocs: [{ appId: "1" }],
+        } as any,
+      ],
+      failedKeywords: [],
+      filteredOut: [],
+    } as any);
+
+    await asoCommand.handler?.({
+      subcommand: "keywords",
+      country: "US",
+      stdout: true,
+      terms: "term",
+    } as any);
+
+    expect(consoleLogSpy).toHaveBeenCalledWith(
+      JSON.stringify(
+        {
+          items: [
+            {
+              keyword: "term",
+              popularity: 42,
+              difficultyScore: 22,
+            },
+          ],
+          failedKeywords: [],
+          filteredOut: [],
+        },
+        null,
+        2
+      )
+    );
+  });
+
+  it("persists to provided app id", async () => {
+    jest.mocked(keywordPipelineService.parseKeywords).mockReturnValue(["term"]);
+    jest.mocked(keywordPipelineService.run).mockResolvedValue({
+      items: [{ keyword: "term", popularity: 42 } as any],
+      failedKeywords: [],
+      filteredOut: [],
+    } as any);
+
+    await asoCommand.handler?.({
+      subcommand: "keywords",
+      country: "US",
+      terms: "term",
+      "app-id": "123456",
+    } as any);
+
+    expect(saveKeywordsToResearchApp).toHaveBeenCalledWith(
+      ["term"],
+      "US",
+      "123456"
+    );
+  });
+
+  it("skips association when --no-associate is set", async () => {
+    jest.mocked(keywordPipelineService.parseKeywords).mockReturnValue([
+      "term",
+      "term-2",
+    ]);
+    jest.mocked(keywordPipelineService.run).mockResolvedValue({
+      items: [{ keyword: "term", popularity: 42 } as any],
+      failedKeywords: [{ keyword: "term-2", reasonCode: "FAILED" } as any],
+      filteredOut: [],
+    } as any);
+
+    await asoCommand.handler?.({
+      subcommand: "keywords",
+      country: "US",
+      terms: "term,term-2",
+      associate: false,
+      "app-id": "123456",
+    } as any);
+
+    expect(keywordPipelineService.run).toHaveBeenCalledWith("US", ["term", "term-2"], {
+      filters: {
+        minPopularity: undefined,
+        maxDifficulty: undefined,
+      },
+    });
+    expect(saveKeywordsToResearchApp).not.toHaveBeenCalled();
+  });
+
+  it("reauthenticates silently and retries once in --stdout mode on auth-required error", async () => {
+    const authRequiredError = Object.assign(new Error("auth required"), {
+      code: "ASO_AUTH_REAUTH_REQUIRED",
+    });
+    jest.mocked(keywordPipelineService.parseKeywords).mockReturnValue(["term"]);
+    jest
+      .mocked(keywordPipelineService.run)
+      .mockRejectedValueOnce(authRequiredError)
+      .mockResolvedValueOnce({
+        items: [{ keyword: "term", popularity: 42 }],
+        failedKeywords: [],
+        filteredOut: [],
+      } as any);
+
+    await asoCommand.handler?.({
+      subcommand: "keywords",
+      country: "US",
+      stdout: true,
+      terms: "term",
+    } as any);
+
+    expect(asoAuthService.reAuthenticate).toHaveBeenCalledTimes(1);
+    expect(asoAuthService.reAuthenticate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onUserActionRequired: expect.any(Function),
+      })
+    );
+    expect(keywordPipelineService.run).toHaveBeenNthCalledWith(1, "US", ["term"], {
+      allowInteractiveAuthRecovery: false,
+      filters: {
+        minPopularity: undefined,
+        maxDifficulty: undefined,
+      },
+    });
+    expect(keywordPipelineService.run).toHaveBeenNthCalledWith(2, "US", ["term"], {
+      allowInteractiveAuthRecovery: false,
+      filters: {
+        minPopularity: undefined,
+        maxDifficulty: undefined,
+      },
+    });
+  });
+
+  it("fails with actionable message when --stdout reauth requires user interaction", async () => {
+    const authRequiredError = Object.assign(new Error("auth required"), {
+      code: "ASO_AUTH_REAUTH_REQUIRED",
+    });
+    jest.mocked(keywordPipelineService.parseKeywords).mockReturnValue(["term"]);
+    jest
+      .mocked(keywordPipelineService.run)
+      .mockRejectedValueOnce(authRequiredError);
+    jest
+      .mocked(asoAuthService.reAuthenticate)
+      .mockImplementation(async (options?: any) => {
+        options?.onUserActionRequired?.("credentials");
+        return "cookie=value";
+      });
+
+    await expect(
+      asoCommand.handler?.({
+        subcommand: "keywords",
+        country: "US",
+        stdout: true,
+        terms: "term",
+      } as any)
+    ).rejects.toThrow(STDOUT_INTERACTIVE_AUTH_REQUIRED_MESSAGE);
+
+    expect(keywordPipelineService.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables max-difficulty filtering and masks difficulty when user is not entitled", async () => {
+    const result = {
+      items: [{ keyword: "term", popularity: 42, difficultyScore: 77 }],
+      failedKeywords: [],
+      filteredOut: [],
+    };
+    jest.mocked(asoBackendClient.isDifficultyEntitled).mockResolvedValue(false);
+    jest.mocked(keywordPipelineService.parseKeywords).mockReturnValue(["term"]);
+    jest.mocked(keywordPipelineService.run).mockResolvedValue(result as any);
+
+    await asoCommand.handler?.({
+      subcommand: "keywords",
+      country: "US",
+      stdout: true,
+      terms: "term",
+      "max-difficulty": 10,
+    } as any);
+
+    expect(keywordPipelineService.run).toHaveBeenCalledWith("US", ["term"], {
+      allowInteractiveAuthRecovery: false,
+      filters: {
+        minPopularity: undefined,
+        maxDifficulty: undefined,
+      },
+    });
+    expect(consoleLogSpy).toHaveBeenCalledWith(
+      JSON.stringify(
+        {
+          items: [
+            {
+              keyword: "term",
+              popularity: 42,
+              difficultyScore: null,
+            },
+          ],
+          failedKeywords: [],
+          filteredOut: [],
+        },
+        null,
+        2
+      )
+    );
+  });
+});
