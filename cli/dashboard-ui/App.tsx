@@ -74,18 +74,41 @@ type KeywordItem = {
   keyword: string;
   popularity: number | null;
   difficultyScore: number | null;
+  isBrandKeyword?: boolean | null;
+  isFavorite?: boolean;
   appCount: number | null;
   updatedAt?: string;
   keywordStatus?: "ok" | "pending" | "failed";
   orderedAppIds?: string[];
   positions?: Array<{ appId: string; previousPosition: number | null; currentPosition: number | null }>;
 };
+type KeywordPagedPayload = {
+  items: KeywordItem[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+  hasPrevPage: boolean;
+  hasNextPage: boolean;
+  associatedCount: number;
+  failedCount: number;
+  pendingCount: number;
+};
 type KeywordDetails = {
   keyword: string;
   appDocs: AppDoc[];
 };
+type KeywordHistoryPoint = {
+  capturedAt: string;
+  position: number;
+};
+type KeywordPositionHistoryPayload = {
+  appId: string;
+  keyword: string;
+  points: KeywordHistoryPoint[];
+};
 
-type FilterMenuKey = "popularity" | "difficulty" | "rank";
+type FilterMenuKey = "popularity" | "difficulty" | "brand" | "favorite" | "rank";
 type KeywordActionMenuState = {
   x: number;
   y: number;
@@ -102,6 +125,8 @@ type Row = {
   keyword: string;
   popularity: number;
   difficultyScore: number | null;
+  isBrandKeyword: boolean | null;
+  isFavorite: boolean;
   appCount: number | null;
   updatedAt?: string;
   previousPosition: number | null;
@@ -133,10 +158,14 @@ const SORT_LABEL_BY_KEY: Record<SortKey, string> = {
 
 const POPULARITY_OPTIONS = DASHBOARD_FILTER_OPTIONS.popularity;
 const DIFFICULTY_OPTIONS = DASHBOARD_FILTER_OPTIONS.difficulty;
+const BRAND_OPTIONS = DASHBOARD_FILTER_OPTIONS.brand;
+const FAVORITE_OPTIONS = DASHBOARD_FILTER_OPTIONS.favorite;
 const RANK_OPTIONS = DASHBOARD_FILTER_OPTIONS.rank;
 
 const DEFAULT_MIN_POPULARITY = DASHBOARD_FILTER_DEFAULTS.minPopularity;
 const DEFAULT_MAX_DIFFICULTY = DASHBOARD_FILTER_DEFAULTS.maxDifficulty;
+const DEFAULT_BRAND_FILTER = DASHBOARD_FILTER_DEFAULTS.brand;
+const DEFAULT_FAVORITE_FILTER = DASHBOARD_FILTER_DEFAULTS.favorite;
 const DEFAULT_MIN_RANK = DASHBOARD_FILTER_DEFAULTS.minRank;
 const DEFAULT_MAX_RANK = DASHBOARD_FILTER_DEFAULTS.maxRank;
 const TOP_APPS_DIALOG_LIMIT = 10;
@@ -145,6 +174,15 @@ const MOBILE_BREAKPOINT = "(max-width: 980px)";
 const STATUS_MESSAGE_TIMEOUT_MS = 4000;
 const STARTUP_REFRESH_STATUS_POLL_INTERVAL_SECONDS = 10;
 const SIDEBAR_SELECTION_CONTROL_SELECTOR = ".app-id-copy-target, .app-id-copy-icon";
+const KEYWORDS_PAGE_SIZE = 100;
+const POSITION_HISTORY_CHART_WIDTH = 760;
+const POSITION_HISTORY_CHART_HEIGHT = 250;
+const POSITION_HISTORY_CHART_PADDING = {
+  top: 16,
+  right: 16,
+  bottom: 32,
+  left: 40,
+};
 
 type StartupRefreshStatus = "idle" | "running" | "completed" | "failed";
 
@@ -208,6 +246,14 @@ function CheckIcon() {
   );
 }
 
+function HeartIcon({ filled }: { filled: boolean }) {
+  return (
+    <span aria-hidden="true" className="favorite-heart-icon">
+      {filled ? "♥" : "♡"}
+    </span>
+  );
+}
+
 function OpenInNewTabIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
@@ -246,7 +292,15 @@ export function App() {
     }
   });
   const [keywords, setKeywords] = useState<Row[]>([]);
+  const [keywordPage, setKeywordPage] = useState(1);
+  const [keywordTotalCount, setKeywordTotalCount] = useState(0);
+  const [keywordTotalPages, setKeywordTotalPages] = useState(1);
+  const [associatedKeywordCount, setAssociatedKeywordCount] = useState(0);
+  const [pendingKeywordCount, setPendingKeywordCount] = useState(0);
   const [failedKeywordCount, setFailedKeywordCount] = useState(0);
+  const [favoriteMutationKeywords, setFavoriteMutationKeywords] = useState<Set<string>>(
+    () => new Set()
+  );
   const [openFilterMenu, setOpenFilterMenu] = useState<FilterMenuKey | null>(null);
   const [keywordActionMenu, setKeywordActionMenu] = useState<KeywordActionMenuState | null>(null);
   const [appActionMenu, setAppActionMenu] = useState<AppActionMenuState | null>(null);
@@ -271,12 +325,21 @@ export function App() {
   const [topAppsRows, setTopAppsRows] = useState<TopAppRow[]>([]);
   const [topAppsLoading, setTopAppsLoading] = useState(false);
   const [topAppsError, setTopAppsError] = useState("");
+  const [positionHistoryKeyword, setPositionHistoryKeyword] = useState<string | null>(
+    null
+  );
+  const [positionHistoryPoints, setPositionHistoryPoints] = useState<
+    KeywordHistoryPoint[]
+  >([]);
+  const [positionHistoryLoading, setPositionHistoryLoading] = useState(false);
+  const [positionHistoryError, setPositionHistoryError] = useState("");
   const [startupRefreshState, setStartupRefreshState] =
     useState<StartupRefreshStatusPayload | null>(null);
   const [displayLocale] = useState(() => getBrowserLocale());
   const isInitializedRef = useRef(false);
   const addKeywordsInputRef = useRef<HTMLInputElement | null>(null);
   const keywordLoadRequestIdRef = useRef(0);
+  const keywordQueryKeyRef = useRef<string | null>(null);
   const selectedAppIdRef = useRef(selectedAppId);
   const autoRetryInFlightRef = useRef(false);
   const startupAppSyncAtRef = useRef<string | null>(null);
@@ -298,6 +361,10 @@ export function App() {
     setMaxDifficulty,
     minPopularity,
     setMinPopularity,
+    brandFilter,
+    setBrandFilter,
+    favoriteFilter,
+    setFavoriteFilter,
     minRank,
     setMinRank,
     maxRank,
@@ -310,6 +377,7 @@ export function App() {
   } = useFiltersSort({
     keywords,
     showRankingColumns,
+    mode: "server",
   });
   const {
     selectedKeywords,
@@ -360,7 +428,7 @@ export function App() {
     [ownedApps]
   );
   const emptyStateText =
-    keywords.length === 0
+    associatedKeywordCount === 0
       ? "No keywords yet for this app."
       : "No keywords match the current search/filters.";
   const hasAnyAddedNonDefaultApp = useMemo(
@@ -378,13 +446,72 @@ export function App() {
     return list;
   }, []);
 
-  const loadKeywords = useCallback(async (appId: string) => {
+  const buildKeywordQueryKey = useCallback((appId: string) => {
+    const normalizedKeywordFilter = keywordFilter.trim().toLowerCase();
+    const normalizedMinRank = showRankingColumns ? minRank : DEFAULT_MIN_RANK;
+    const normalizedMaxRank = showRankingColumns ? maxRank : DEFAULT_MAX_RANK;
+    return [
+      appId,
+      normalizedKeywordFilter,
+      String(minPopularity),
+      String(maxDifficulty),
+      brandFilter,
+      favoriteFilter,
+      String(normalizedMinRank),
+      String(normalizedMaxRank),
+      sortBy,
+      sortDir,
+    ].join("|");
+  }, [
+    brandFilter,
+    favoriteFilter,
+    keywordFilter,
+    maxDifficulty,
+    maxRank,
+    minPopularity,
+    minRank,
+    showRankingColumns,
+    sortBy,
+    sortDir,
+  ]);
+
+  const keywordQueryKey = useMemo(
+    () => buildKeywordQueryKey(selectedAppId),
+    [buildKeywordQueryKey, selectedAppId]
+  );
+
+  const loadKeywords = useCallback(async (appId: string, requestedPage: number = 1) => {
     const requestId = ++keywordLoadRequestIdRef.current;
-    const data = await apiGet<KeywordItem[]>(
-      `/api/aso/keywords?country=${DEFAULT_ASO_COUNTRY}&appId=${encodeURIComponent(appId)}`
+    const params = new URLSearchParams({
+      country: DEFAULT_ASO_COUNTRY,
+      appId,
+      page: String(Math.max(1, requestedPage)),
+      pageSize: String(KEYWORDS_PAGE_SIZE),
+      sortBy,
+      sortDir,
+      minPopularity: String(minPopularity),
+      maxDifficulty: String(maxDifficulty),
+      brand: brandFilter,
+      favorite: favoriteFilter,
+    });
+    const trimmedKeywordFilter = keywordFilter.trim();
+    if (trimmedKeywordFilter !== "") {
+      params.set("keyword", trimmedKeywordFilter);
+    }
+    if (showRankingColumns) {
+      params.set("minRank", String(minRank));
+      params.set("maxRank", String(maxRank));
+    } else {
+      params.set("minRank", String(DEFAULT_MIN_RANK));
+      params.set("maxRank", String(DEFAULT_MAX_RANK));
+    }
+
+    const data = await apiGet<KeywordPagedPayload>(
+      `/api/aso/keywords?${params.toString()}`
     );
     if (requestId !== keywordLoadRequestIdRef.current) return;
-    const rows = data.map((item) => {
+
+    const rows = (data.items ?? []).map((item) => {
       const p = (item.positions ?? []).find((x) => x.appId === appId);
       const keywordStatus =
         item.keywordStatus ?? (item.difficultyScore == null ? "pending" : "ok");
@@ -392,6 +519,8 @@ export function App() {
         keyword: item.keyword,
         popularity: item.popularity ?? 0,
         difficultyScore: item.difficultyScore,
+        isBrandKeyword: item.isBrandKeyword ?? null,
+        isFavorite: item.isFavorite === true,
         appCount: item.appCount,
         updatedAt: item.updatedAt,
         previousPosition: p?.previousPosition ?? null,
@@ -399,9 +528,41 @@ export function App() {
         keywordStatus,
       } satisfies Row;
     });
+
     setKeywords(rows);
-    setFailedKeywordCount(rows.filter((row) => row.keywordStatus === "failed").length);
-  }, []);
+    setKeywordPage((prev) => {
+      const nextPage = Math.max(1, data.page ?? requestedPage);
+      return prev === nextPage ? prev : nextPage;
+    });
+    setKeywordTotalCount(Math.max(0, data.totalCount ?? rows.length));
+    setKeywordTotalPages(Math.max(1, data.totalPages ?? 1));
+    setAssociatedKeywordCount(
+      typeof data.associatedCount === "number"
+        ? Math.max(0, data.associatedCount)
+        : Math.max(0, data.totalCount ?? rows.length)
+    );
+    setFailedKeywordCount(
+      typeof data.failedCount === "number"
+        ? Math.max(0, data.failedCount)
+        : rows.filter((row) => row.keywordStatus === "failed").length
+    );
+    setPendingKeywordCount(
+      typeof data.pendingCount === "number"
+        ? Math.max(0, data.pendingCount)
+        : rows.filter((row) => row.keywordStatus === "pending").length
+    );
+  }, [
+    brandFilter,
+    favoriteFilter,
+    keywordFilter,
+    maxDifficulty,
+    minPopularity,
+    minRank,
+    maxRank,
+    showRankingColumns,
+    sortBy,
+    sortDir,
+  ]);
 
   useEffect(() => {
     void (async () => {
@@ -424,7 +585,8 @@ export function App() {
           activeAppId = DEFAULT_RESEARCH_APP_ID;
           setSelectedAppId(DEFAULT_RESEARCH_APP_ID);
         }
-        await loadKeywords(activeAppId);
+        await loadKeywords(activeAppId, 1);
+        keywordQueryKeyRef.current = buildKeywordQueryKey(activeAppId);
       } catch (error) {
         setErrorText(toActionableErrorMessage(error, "Failed to load dashboard"));
       } finally {
@@ -433,7 +595,7 @@ export function App() {
         setLoadingText("");
       }
     })();
-  }, [loadApps, loadKeywords]);
+  }, [loadApps]);
 
   useEffect(() => {
     selectedAppIdRef.current = selectedAppId;
@@ -441,10 +603,24 @@ export function App() {
 
   useEffect(() => {
     if (!isInitializedRef.current) return;
-    void loadKeywords(selectedAppId).catch((error) => {
+    const queryChanged = keywordQueryKeyRef.current !== keywordQueryKey;
+    if (queryChanged) {
+      keywordQueryKeyRef.current = keywordQueryKey;
+      if (keywordPage !== 1) {
+        setKeywordPage(1);
+        return;
+      }
+    }
+
+    void loadKeywords(selectedAppId, keywordPage).catch((error) => {
       setErrorText(toActionableErrorMessage(error, "Failed to load keywords"));
     });
-  }, [selectedAppId, loadKeywords]);
+  }, [
+    keywordPage,
+    keywordQueryKey,
+    loadKeywords,
+    selectedAppId,
+  ]);
 
   useEffect(() => {
     document.title = `ASO Dashboard - ${selectedAppName}`;
@@ -570,6 +746,15 @@ export function App() {
   }, [topAppsKeyword]);
 
   useEffect(() => {
+    if (!positionHistoryKeyword) return;
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPositionHistoryKeyword(null);
+    };
+    document.addEventListener("keydown", onEscape);
+    return () => document.removeEventListener("keydown", onEscape);
+  }, [positionHistoryKeyword]);
+
+  useEffect(() => {
     let isActive = true;
     let intervalId: number | null = null;
 
@@ -607,10 +792,7 @@ export function App() {
     };
   }, []);
 
-  const hasPendingDifficulty = useMemo(
-    () => keywords.some((row) => row.keywordStatus === "pending"),
-    [keywords]
-  );
+  const hasPendingDifficulty = pendingKeywordCount > 0;
 
   const copyAppId = useCallback(async (appId: string) => {
     try {
@@ -624,6 +806,7 @@ export function App() {
   const selectSidebarApp = useCallback((appId: string) => {
     if (selectedAppId === appId) return;
     setAppActionMenu(null);
+    setKeywordPage(1);
     setSelectedAppId(appId);
     setSelectedKeywords(new Set());
     setSelectionAnchor(null);
@@ -640,10 +823,10 @@ export function App() {
   useEffect(() => {
     if (!hasPendingDifficulty) return;
     const id = window.setInterval(() => {
-      void loadKeywords(selectedAppId).catch(() => {});
+      void loadKeywords(selectedAppId, keywordPage).catch(() => {});
     }, 3000);
     return () => window.clearInterval(id);
-  }, [hasPendingDifficulty, loadKeywords, selectedAppId]);
+  }, [hasPendingDifficulty, loadKeywords, keywordPage, selectedAppId]);
 
   const onSelectRow = (
     rowKeyword: string,
@@ -672,13 +855,49 @@ export function App() {
       setSelectionAnchor(null);
       setSuccessText(`Deleted ${selected.length} keyword${selected.length === 1 ? "" : "s"}.`);
       await loadApps();
-      await loadKeywords(selectedAppId);
+      await loadKeywords(selectedAppId, keywordPage);
     } catch (error) {
       setErrorText(toActionableErrorMessage(error, "Failed to delete keywords"));
     } finally {
       setLoadingText("");
     }
   };
+
+  const onToggleKeywordFavorite = useCallback(
+    async (rowKeyword: string, nextIsFavorite: boolean) => {
+      setErrorText("");
+      setFavoriteMutationKeywords((prev) => {
+        const next = new Set(prev);
+        next.add(rowKeyword);
+        return next;
+      });
+      try {
+        await apiWrite("POST", "/api/aso/keywords/favorite", {
+          appId: selectedAppId,
+          keyword: rowKeyword,
+          isFavorite: nextIsFavorite,
+          country: DEFAULT_ASO_COUNTRY,
+        });
+        setKeywords((prev) =>
+          prev.map((row) =>
+            row.keyword === rowKeyword ? { ...row, isFavorite: nextIsFavorite } : row
+          )
+        );
+        await loadKeywords(selectedAppId, keywordPage);
+      } catch (error) {
+        setErrorText(
+          toActionableErrorMessage(error, "Failed to update keyword favorite status")
+        );
+      } finally {
+        setFavoriteMutationKeywords((prev) => {
+          const next = new Set(prev);
+          next.delete(rowKeyword);
+          return next;
+        });
+      }
+    },
+    [keywordPage, loadKeywords, selectedAppId]
+  );
 
   const onDeleteSidebarApp = useCallback(
     async (appId: string, appName: string) => {
@@ -703,7 +922,7 @@ export function App() {
           nextSelectedAppId = fallbackApp?.id ?? DEFAULT_RESEARCH_APP_ID;
           setSelectedAppId(nextSelectedAppId);
         }
-        await loadKeywords(nextSelectedAppId);
+        await loadKeywords(nextSelectedAppId, 1);
         setSuccessText(`Deleted "${appName}".`);
       } catch (error) {
         setErrorText(toActionableErrorMessage(error, "Failed to delete app"));
@@ -909,7 +1128,11 @@ export function App() {
         setSuccessText("");
         setPendingAddContext(null);
         await loadApps();
-        await loadKeywords(selectedAppId);
+        if (keywordPage === 1) {
+          await loadKeywords(selectedAppId, 1);
+        } else {
+          setKeywordPage(1);
+        }
         return true;
       } catch (error) {
         if (openAuthModalForPendingAdd(error, kws)) return false;
@@ -922,6 +1145,7 @@ export function App() {
     },
     [
       selectedAppId,
+      keywordPage,
       loadApps,
       loadKeywords,
       openAuthModalForPendingAdd,
@@ -969,7 +1193,7 @@ export function App() {
         appId: selectedAppId,
         country: DEFAULT_ASO_COUNTRY,
       });
-      await loadKeywords(selectedAppId);
+      await loadKeywords(selectedAppId, keywordPage);
       const retriedLabel = `Retried ${result.retriedCount} failed keyword${result.retriedCount === 1 ? "" : "s"}`;
       if (result.failedCount === 0) {
         setSuccessText(`${retriedLabel}: ${result.succeededCount} succeeded.`);
@@ -986,7 +1210,7 @@ export function App() {
       setIsRetryingFailedKeywords(false);
       setLoadingText("");
     }
-  }, [failedKeywordCount, loadKeywords, selectedAppId]);
+  }, [failedKeywordCount, keywordPage, loadKeywords, selectedAppId]);
 
   useEffect(() => {
     if (authStatus !== "succeeded") return;
@@ -1054,9 +1278,9 @@ export function App() {
       );
       if (selectedAddedId) {
         setSelectedAppId(selectedAddedId);
-        await loadKeywords(selectedAddedId);
+        await loadKeywords(selectedAddedId, 1);
       } else {
-        await loadKeywords(selectedAppIdRef.current);
+        await loadKeywords(selectedAppIdRef.current, keywordPage);
       }
 
       if (failedErrors.length === 0) {
@@ -1101,6 +1325,34 @@ export function App() {
     }
   };
 
+  const onOpenPositionHistory = async (rowKeyword: string) => {
+    setPositionHistoryKeyword(rowKeyword);
+    setPositionHistoryPoints([]);
+    setPositionHistoryError("");
+    setPositionHistoryLoading(true);
+    try {
+      const data = await apiGet<KeywordPositionHistoryPayload>(
+        `/api/aso/keywords/history?country=${DEFAULT_ASO_COUNTRY}&appId=${encodeURIComponent(
+          selectedAppId
+        )}&keyword=${encodeURIComponent(rowKeyword)}`
+      );
+      setPositionHistoryPoints(
+        (data.points ?? [])
+          .filter((point) => Number.isFinite(point.position))
+          .map((point) => ({
+            capturedAt: point.capturedAt,
+            position: Number(point.position),
+          }))
+      );
+    } catch (error) {
+      setPositionHistoryError(
+        toActionableErrorMessage(error, "Failed to load position history")
+      );
+    } finally {
+      setPositionHistoryLoading(false);
+    }
+  };
+
   const onSortHeader = (key: SortKey) => {
     if (sortBy === key) {
       setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
@@ -1135,6 +1387,16 @@ export function App() {
 
   const formatRankValue = (value: number) =>
     value === DEFAULT_MAX_RANK ? DASHBOARD_RANK_OPEN_ENDED_LABEL : String(value);
+  const formatBrandFilterValue = (value: "all" | "brand" | "non_brand") => {
+    if (value === "brand") return "Brand";
+    if (value === "non_brand") return "Non-brand";
+    return "All";
+  };
+  const formatFavoriteFilterValue = (value: "all" | "favorite" | "non_favorite") => {
+    if (value === "favorite") return "Favorite";
+    if (value === "non_favorite") return "Non-favorite";
+    return "All";
+  };
 
   const rankFilterLabel = useMemo(() => {
     const hasMin = minRank !== DEFAULT_MIN_RANK;
@@ -1145,12 +1407,80 @@ export function App() {
     return `<${formatRankValue(maxRank)}`;
   }, [minRank, maxRank]);
 
+  const positionHistoryChart = useMemo(() => {
+    if (positionHistoryPoints.length === 0) return null;
+    const sorted = [...positionHistoryPoints]
+      .filter((point) => Number.isFinite(point.position))
+      .sort((a, b) => Date.parse(a.capturedAt) - Date.parse(b.capturedAt));
+    if (sorted.length === 0) return null;
+
+    const chartWidth = POSITION_HISTORY_CHART_WIDTH;
+    const chartHeight = POSITION_HISTORY_CHART_HEIGHT;
+    const innerWidth =
+      chartWidth -
+      POSITION_HISTORY_CHART_PADDING.left -
+      POSITION_HISTORY_CHART_PADDING.right;
+    const innerHeight =
+      chartHeight -
+      POSITION_HISTORY_CHART_PADDING.top -
+      POSITION_HISTORY_CHART_PADDING.bottom;
+
+    const positions = sorted.map((point) => point.position);
+    const bestPosition = Math.min(...positions);
+    const worstPosition = Math.max(...positions);
+    const yRange = Math.max(1, worstPosition - bestPosition);
+    const minTimestamp = Date.parse(sorted[0].capturedAt);
+    const maxTimestamp = Date.parse(sorted[sorted.length - 1].capturedAt);
+    const xRange = Math.max(1, maxTimestamp - minTimestamp);
+
+    const points = sorted.map((point) => {
+      const timestamp = Date.parse(point.capturedAt);
+      const x =
+        POSITION_HISTORY_CHART_PADDING.left +
+        ((timestamp - minTimestamp) / xRange) * innerWidth;
+      const y =
+        POSITION_HISTORY_CHART_PADDING.top +
+        ((point.position - bestPosition) / yRange) * innerHeight;
+      return {
+        x,
+        y,
+        capturedAt: point.capturedAt,
+        position: point.position,
+      };
+    });
+
+    const linePath = points
+      .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+      .join(" ");
+
+    return {
+      chartWidth,
+      chartHeight,
+      points,
+      linePath,
+      firstDateLabel: formatCalendarDate(sorted[0].capturedAt, displayLocale) ?? "-",
+      lastDateLabel:
+        formatCalendarDate(sorted[sorted.length - 1].capturedAt, displayLocale) ??
+        "-",
+      bestPosition,
+      worstPosition,
+    };
+  }, [displayLocale, positionHistoryPoints]);
+
   const getFilterLabel = (key: FilterMenuKey): string | null => {
     switch (key) {
       case "popularity":
         return minPopularity !== DEFAULT_MIN_POPULARITY ? `>${minPopularity}` : null;
       case "difficulty":
         return maxDifficulty !== DEFAULT_MAX_DIFFICULTY ? `<${maxDifficulty}` : null;
+      case "brand":
+        return brandFilter !== DEFAULT_BRAND_FILTER
+          ? formatBrandFilterValue(brandFilter)
+          : null;
+      case "favorite":
+        return favoriteFilter !== DEFAULT_FAVORITE_FILTER
+          ? formatFavoriteFilterValue(favoriteFilter)
+          : null;
       case "rank":
         return rankFilterLabel;
     }
@@ -1198,6 +1528,52 @@ export function App() {
                 }}
               >
                 {option}
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    if (key === "brand") {
+      return (
+        <div className="filter-menu-content">
+          <p className="filter-menu-label">Brand</p>
+          <div className="filter-options-vertical">
+            {BRAND_OPTIONS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                className={option === brandFilter ? "active" : ""}
+                onClick={() => {
+                  setBrandFilter(option);
+                  setOpenFilterMenu(null);
+                }}
+              >
+                {formatBrandFilterValue(option)}
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    if (key === "favorite") {
+      return (
+        <div className="filter-menu-content">
+          <p className="filter-menu-label">Favorite</p>
+          <div className="filter-options-vertical">
+            {FAVORITE_OPTIONS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                className={option === favoriteFilter ? "active" : ""}
+                onClick={() => {
+                  setFavoriteFilter(option);
+                  setOpenFilterMenu(null);
+                }}
+              >
+                {formatFavoriteFilterValue(option)}
               </button>
             ))}
           </div>
@@ -1303,7 +1679,12 @@ export function App() {
     keywordFilter.trim() !== "" ||
     maxDifficulty !== DEFAULT_MAX_DIFFICULTY ||
     minPopularity !== DEFAULT_MIN_POPULARITY ||
+    brandFilter !== DEFAULT_BRAND_FILTER ||
+    favoriteFilter !== DEFAULT_FAVORITE_FILTER ||
     hasRankFiltersApplied;
+  const keywordCountLabelValue = keywordTotalCount;
+  const showKeywordPagination = keywordTotalPages > 1;
+  const keywordPageLabel = Math.min(keywordPage, keywordTotalPages);
   return (
     <div id="app-shell" className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar ui-card" aria-label="Apps">
@@ -1631,6 +2012,8 @@ export function App() {
               setKeywordFilter("");
               setMaxDifficulty(DEFAULT_MAX_DIFFICULTY);
               setMinPopularity(DEFAULT_MIN_POPULARITY);
+              setBrandFilter(DEFAULT_BRAND_FILTER);
+              setFavoriteFilter(DEFAULT_FAVORITE_FILTER);
               setMinRank(DEFAULT_MIN_RANK);
               setMaxRank(DEFAULT_MAX_RANK);
             }}
@@ -1653,8 +2036,39 @@ export function App() {
           </Button>
 
           <Badge id="stats-pill">
-            {filteredRows.length} keyword{filteredRows.length === 1 ? "" : "s"}
+            {keywordCountLabelValue} keyword{keywordCountLabelValue === 1 ? "" : "s"}
           </Badge>
+          {showKeywordPagination ? (
+            <div className="keyword-pagination" aria-label="Keyword pagination">
+              <Button
+                id="keywords-page-prev"
+                variant="outline"
+                size="sm"
+                type="button"
+                disabled={keywordPageLabel <= 1 || showLoading}
+                onClick={() => {
+                  setKeywordPage((prev) => Math.max(1, prev - 1));
+                }}
+              >
+                Prev
+              </Button>
+              <span className="keyword-pagination-label">
+                Page {keywordPageLabel} of {keywordTotalPages}
+              </span>
+              <Button
+                id="keywords-page-next"
+                variant="outline"
+                size="sm"
+                type="button"
+                disabled={keywordPageLabel >= keywordTotalPages || showLoading}
+                onClick={() => {
+                  setKeywordPage((prev) => Math.min(keywordTotalPages, prev + 1));
+                }}
+              >
+                Next
+              </Button>
+            </div>
+          ) : null}
         </Card>
 
         <Card className="table-card">
@@ -1726,6 +2140,28 @@ export function App() {
                         {renderSortLabel("difficulty")}
                       </button>
                       {renderFilterDropdown("difficulty", "Difficulty")}
+                    </div>
+                  </th>
+                  <th
+                    className="col-middle"
+                    data-sort-key="brand"
+                  >
+                    <div className="column-filter-header">
+                      <span className="sort-label">
+                        <span>Brand</span>
+                      </span>
+                      {renderFilterDropdown("brand", "Brand")}
+                    </div>
+                  </th>
+                  <th
+                    className="col-middle"
+                    data-sort-key="favorite"
+                  >
+                    <div className="column-filter-header">
+                      <span className="sort-label">
+                        <span>Favorite</span>
+                      </span>
+                      {renderFilterDropdown("favorite", "Favorite")}
                     </div>
                   </th>
                   <th
@@ -1812,24 +2248,66 @@ export function App() {
                         {row.keywordStatus === "failed"
                           ? "-"
                           : row.difficultyScore == null
-                            ? row.keywordStatus === "pending"
-                              ? "Calculating..."
-                              : "?"
+                            ? "Calculating..."
                             : Math.round(row.difficultyScore)}
+                      </td>
+                      <td className="col-middle">
+                        {row.isBrandKeyword ? "✓" : "-"}
+                      </td>
+                      <td className="col-middle favorite-column">
+                        <button
+                          type="button"
+                          className={`favorite-heart-button ${row.isFavorite ? "is-favorite" : ""}`}
+                          aria-label={`${row.isFavorite ? "Unfavorite" : "Favorite"} keyword ${row.keyword}`}
+                          aria-pressed={row.isFavorite}
+                          disabled={favoriteMutationKeywords.has(row.keyword)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void onToggleKeywordFavorite(row.keyword, !row.isFavorite);
+                          }}
+                        >
+                          <HeartIcon filled={row.isFavorite} />
+                        </button>
                       </td>
                       <td className="num col-middle">{row.appCount ?? "-"}</td>
                       {showRankingColumns ? (
                         <>
-                          <td className="num col-middle">{row.currentPosition ?? "-"}</td>
+                          <td className="num col-middle">
+                            {row.currentPosition == null ? (
+                              "-"
+                            ) : (
+                              <button
+                                type="button"
+                                className="rank-history-trigger"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void onOpenPositionHistory(row.keyword);
+                                }}
+                              >
+                                {row.currentPosition}
+                              </button>
+                            )}
+                          </td>
                           <td className="col-middle">
                             {change == null ? (
                               "-"
-                            ) : change === 0 ? (
-                              <span className="delta same">0</span>
-                            ) : change < 0 ? (
-                              <span className="delta up">+{Math.abs(change)}</span>
                             ) : (
-                              <span className="delta down">-{Math.abs(change)}</span>
+                              <button
+                                type="button"
+                                className="rank-history-trigger"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void onOpenPositionHistory(row.keyword);
+                                }}
+                              >
+                                {change === 0 ? (
+                                  <span className="delta same">0</span>
+                                ) : change < 0 ? (
+                                  <span className="delta up">+{Math.abs(change)}</span>
+                                ) : (
+                                  <span className="delta down">-{Math.abs(change)}</span>
+                                )}
+                              </button>
                             )}
                           </td>
                         </>
@@ -1984,6 +2462,117 @@ export function App() {
                       </article>
                     );
                   })}
+                </div>
+              ) : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {positionHistoryKeyword ? (
+        <div
+          className="dialog-backdrop"
+          onClick={() => setPositionHistoryKeyword(null)}
+          role="presentation"
+        >
+          <section
+            className="dialog-card ui-card position-history-dialog-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Position history for ${positionHistoryKeyword}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="dialog-header">
+              <h2>Position history for "{positionHistoryKeyword}"</h2>
+              <button
+                type="button"
+                className="dialog-close"
+                aria-label="Close"
+                onClick={() => setPositionHistoryKeyword(null)}
+              >
+                ×
+              </button>
+            </header>
+            <div className="dialog-content">
+              {positionHistoryLoading ? (
+                <p className="dialog-message">Loading history...</p>
+              ) : null}
+              {!positionHistoryLoading && positionHistoryError ? (
+                <p className="dialog-message error">{positionHistoryError}</p>
+              ) : null}
+              {!positionHistoryLoading &&
+              !positionHistoryError &&
+              positionHistoryChart == null ? (
+                <p className="dialog-message">No position history yet.</p>
+              ) : null}
+              {!positionHistoryLoading &&
+              !positionHistoryError &&
+              positionHistoryChart != null ? (
+                <div className="position-history-chart-wrap">
+                  <div className="position-history-meta">
+                    <span>
+                      Best rank: <strong>{positionHistoryChart.bestPosition}</strong>
+                    </span>
+                    <span>
+                      Worst rank: <strong>{positionHistoryChart.worstPosition}</strong>
+                    </span>
+                    <span>
+                      Points: <strong>{positionHistoryChart.points.length}</strong>
+                    </span>
+                  </div>
+                  <svg
+                    className="position-history-chart"
+                    viewBox={`0 0 ${positionHistoryChart.chartWidth} ${positionHistoryChart.chartHeight}`}
+                    role="img"
+                    aria-label={`Position trend for ${positionHistoryKeyword}`}
+                  >
+                    <line
+                      x1={POSITION_HISTORY_CHART_PADDING.left}
+                      y1={POSITION_HISTORY_CHART_PADDING.top}
+                      x2={POSITION_HISTORY_CHART_PADDING.left}
+                      y2={
+                        positionHistoryChart.chartHeight -
+                        POSITION_HISTORY_CHART_PADDING.bottom
+                      }
+                      className="position-history-axis"
+                    />
+                    <line
+                      x1={POSITION_HISTORY_CHART_PADDING.left}
+                      y1={
+                        positionHistoryChart.chartHeight -
+                        POSITION_HISTORY_CHART_PADDING.bottom
+                      }
+                      x2={
+                        positionHistoryChart.chartWidth -
+                        POSITION_HISTORY_CHART_PADDING.right
+                      }
+                      y2={
+                        positionHistoryChart.chartHeight -
+                        POSITION_HISTORY_CHART_PADDING.bottom
+                      }
+                      className="position-history-axis"
+                    />
+                    <path
+                      d={positionHistoryChart.linePath}
+                      className="position-history-line"
+                    />
+                    {positionHistoryChart.points.map((point) => (
+                      <circle
+                        key={`${point.capturedAt}-${point.position}`}
+                        cx={point.x}
+                        cy={point.y}
+                        r={3.5}
+                        className="position-history-point"
+                      >
+                        <title>
+                          {`${formatCalendarDate(point.capturedAt, displayLocale) ?? point.capturedAt}: #${point.position}`}
+                        </title>
+                      </circle>
+                    ))}
+                  </svg>
+                  <div className="position-history-axis-labels">
+                    <span>{positionHistoryChart.firstDateLabel}</span>
+                    <span>{positionHistoryChart.lastDateLabel}</span>
+                  </div>
                 </div>
               ) : null}
             </div>

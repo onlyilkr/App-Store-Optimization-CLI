@@ -1,4 +1,4 @@
-import type { AsoDifficultyState } from "../shared/aso-difficulty-state";
+import type { KeywordMatchType } from "../shared/aso-keyword-match";
 
 export interface StoredApp {
   id: string;
@@ -26,8 +26,10 @@ export interface StoredAsoKeyword {
   country: string;
   popularity: number;
   difficultyScore: number | null;
-  difficultyState: AsoDifficultyState;
+  minDifficultyScore: number | null;
+  isBrandKeyword: boolean | null;
   appCount: number | null;
+  keywordMatch: KeywordMatchType | null;
   orderedAppIds: string[];
   createdAt: string;
   updatedAt: string;
@@ -54,6 +56,7 @@ export interface StoredAsoApp {
   appId: string;
   name: string;
   subtitle?: string;
+  publisherName?: string;
   averageUserRating: number;
   userRatingCount: number;
   releaseDate?: string | null;
@@ -69,8 +72,17 @@ export interface StoredAppKeyword {
   appId: string;
   keyword: string;
   country: string;
+  isFavorite: boolean;
   previousPosition: number | null;
   addedAt?: string;
+}
+
+export interface StoredAppKeywordPositionHistoryPoint {
+  appId: string;
+  keyword: string;
+  country: string;
+  position: number | null;
+  capturedAt: string;
 }
 
 export interface AsoDbSchema {

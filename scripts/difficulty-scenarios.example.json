@@ -1,0 +1,42 @@
+[
+  {
+    "appCount": 150,
+    "averageUserRating": 4.5,
+    "userRatingCount": 200,
+    "daysSinceLastRelease": 45,
+    "daysSinceFirstRelease": 450,
+    "keywordMatch": "combinedPhrase"
+  },
+  {
+    "appCount": 150,
+    "averageUserRating": 4.4,
+    "userRatingCount": 300,
+    "daysSinceLastRelease": 45,
+    "daysSinceFirstRelease": 450,
+    "keywordMatch": "combinedPhrase"
+  },
+  {
+    "appCount": 150,
+    "averageUserRating": 3.9,
+    "userRatingCount": 100,
+    "daysSinceLastRelease": 45,
+    "daysSinceFirstRelease": 450,
+    "keywordMatch": "subtitleAllWords"
+  },
+  {
+    "appCount": 150,
+    "averageUserRating": 4.9,
+    "userRatingCount": 10,
+    "daysSinceLastRelease": 450,
+    "daysSinceFirstRelease": 450,
+    "keywordMatch": "titleExactPhrase"
+  },
+  {
+    "appCount": 150,
+    "averageUserRating": 3.9,
+    "userRatingCount": 900,
+    "daysSinceLastRelease": 45,
+    "daysSinceFirstRelease": 450,
+    "keywordMatch": "subtitleAllWords"
+  }
+]

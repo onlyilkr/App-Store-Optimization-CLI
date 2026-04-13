@@ -7,8 +7,6 @@ import { resolveAsoAdamId } from "../services/keywords/aso-adam-id-service";
 import { asoAuthService } from "../services/auth/aso-auth-service";
 import { saveKeywordsToResearchApp } from "../services/keywords/aso-research-keyword-service";
 import { logger } from "../utils/logger";
-import { asoBackendApiKeyService } from "../services/backend/aso-backend-api-key-service";
-import { asoBackendClient } from "../services/backend/aso-backend-client";
 import {
   ASO_MAX_KEYWORDS,
   ASO_MAX_KEYWORDS_PER_CALL_ERROR,
@@ -69,31 +67,6 @@ function persistKeywordsToApp(
   );
 }
 
-function toPublicKeywordFetchResult(
-  result: Awaited<ReturnType<typeof keywordPipelineService.run>>,
-  options?: { maskDifficulty?: boolean }
-) {
-  const shouldMaskDifficulty = options?.maskDifficulty === true;
-  return {
-    items: result.items.map((item) => {
-      return {
-        keyword: item.keyword,
-        popularity: item.popularity,
-        difficultyScore: shouldMaskDifficulty ? null : item.difficultyScore,
-      };
-    }),
-    failedKeywords: result.failedKeywords,
-    filteredOut: result.filteredOut.map((item) =>
-      shouldMaskDifficulty
-        ? {
-            ...item,
-            difficulty: undefined,
-          }
-        : item
-    ),
-  };
-}
-
 async function fetchKeywordsForStdout(
   country: string,
   keywords: string[],
@@ -123,25 +96,20 @@ async function fetchKeywordsForStdout(
 }
 
 const asoCommand: CommandModule = {
-  command: "$0 [subcommand] [terms] [subcommandValue]",
+  command: "$0 [subcommand] [terms]",
   describe:
-    "Open ASO dashboard (default), fetch ASO keyword metrics (`aso keywords`), manage ASO API key (`aso api-key`), reauthenticate (`aso auth`), or reset saved ASO auth state (`aso reset-credentials`). `aso keywords` supports optional popularity/difficulty filters and keyword association controls (default target app: research).",
+    "Open ASO dashboard (default), fetch ASO keyword metrics (`aso keywords`), reauthenticate (`aso auth`), or reset saved ASO auth state (`aso reset-credentials`). `aso keywords` supports optional popularity/difficulty filters and keyword association controls (default target app: research).",
   builder: (yargs) =>
     yargs
       .positional("subcommand", {
         type: "string",
-        choices: ["keywords", "auth", "reset-credentials", "api-key"],
+        choices: ["keywords", "auth", "reset-credentials"],
         describe: "ASO subcommand",
       })
       .positional("terms", {
         type: "string",
         describe:
           'Comma-separated keywords for `keywords`, e.g. aso keywords "x,y,z"',
-      })
-      .positional("subcommandValue", {
-        type: "string",
-        describe:
-          "Auxiliary positional value for subcommands that need it (for example: `aso api-key set <key>`).",
       })
       .option("country", {
         type: "string",
@@ -201,45 +169,6 @@ const asoCommand: CommandModule = {
       return;
     }
 
-    const terms = argv.terms as string | undefined;
-    const subcommandValue = argv.subcommandValue as string | undefined;
-
-    if (subcommand === "api-key") {
-      const action = (terms ?? "status").trim().toLowerCase();
-      const providedKey = subcommandValue ?? "";
-
-      if (action === "set") {
-        asoBackendApiKeyService.setApiKey(providedKey);
-        asoBackendClient.invalidateContextCache();
-        logger.info("ASO API key saved.");
-        return;
-      }
-
-      if (action === "clear") {
-        asoBackendApiKeyService.clearApiKey();
-        asoBackendClient.invalidateContextCache();
-        logger.info("ASO API key cleared.");
-        return;
-      }
-
-      if (action === "status") {
-        const status = asoBackendApiKeyService.getStatus();
-        const sourceLabel =
-          status.source === "env"
-            ? "env"
-            : status.source === "file"
-              ? "~/.aso/key"
-              : "none";
-        const maskedLabel = status.maskedKey ?? "-";
-        logger.info(`ASO API key status: source=${sourceLabel} key=${maskedLabel}`);
-        return;
-      }
-
-      throw new Error(
-        "Unsupported `aso api-key` action. Use one of: `set <key>`, `clear`, `status`."
-      );
-    }
-
     const country = normalizeCountry(argv.country as string);
     assertSupportedCountry(country);
 
@@ -265,12 +194,6 @@ const asoCommand: CommandModule = {
       throw new Error(`Unsupported ASO subcommand: ${subcommand}`);
     }
 
-    if (subcommandValue != null) {
-      throw new Error(
-        "Unexpected extra positional argument for `aso keywords`. Use a single comma-separated keyword string."
-      );
-    }
-
     const targetAppId = argv["app-id"] as string | undefined;
     const filters = {
       minPopularity: parseOptionalThreshold(
@@ -282,15 +205,11 @@ const asoCommand: CommandModule = {
         "--max-difficulty"
       ),
     };
-    const canUseDifficulty = await asoBackendClient.isDifficultyEntitled();
-    if (!canUseDifficulty) {
-      filters.maxDifficulty = undefined;
-    }
     const filtersActive = hasActiveFilters(filters);
     const shouldAssociate = (argv.associate as boolean | undefined) !== false;
 
     const keywords = keywordPipelineService.parseKeywords(
-      terms
+      argv.terms as string | undefined
     );
     if (keywords.length === 0) {
       throw new Error(
@@ -314,15 +233,7 @@ const asoCommand: CommandModule = {
         log: !stdout,
       });
     }
-    console.log(
-      JSON.stringify(
-        toPublicKeywordFetchResult(result, {
-          maskDifficulty: !canUseDifficulty,
-        }),
-        null,
-        2
-      )
-    );
+    console.log(JSON.stringify(result, null, 2));
   },
 };
 

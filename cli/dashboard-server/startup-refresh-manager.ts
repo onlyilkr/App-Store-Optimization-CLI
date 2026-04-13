@@ -2,7 +2,6 @@ import type { StoredAppKeyword, StoredAsoKeyword } from "../db/types";
 import { normalizeKeyword } from "../shared/aso-keyword-utils";
 import {
   isCompleteStoredAsoKeyword,
-  isPaywalledStoredAsoKeyword,
   isStoredKeywordOrderFresh,
   isStoredKeywordPopularityFresh,
 } from "../shared/aso-keyword-validity";
@@ -36,14 +35,14 @@ type StartupRefreshDeps = {
   country: string;
   listKeywords: (country: string) => StoredAsoKeyword[];
   listAppKeywords: (country: string) => StoredAppKeyword[];
-  listOwnedAppIds: () => Set<string>;
+  listAssociatedAppIds: () => Set<string>;
+  listOrderRelevantAppIds: () => Set<string>;
   enrichKeywords: (
     country: string,
     items: KeywordRefreshItem[]
   ) => Promise<unknown>;
   isForegroundBusy: () => boolean;
   reportError?: (error: unknown, metadata: Record<string, unknown>) => void;
-  isDifficultyEntitled?: () => Promise<boolean>;
   nowMs?: () => number;
   sleep?: (ms: number) => Promise<void>;
   keywordBatchSize?: number;
@@ -57,14 +56,19 @@ export type StartupRefreshManager = {
 export function selectKeywordRefreshCandidates(params: {
   keywords: StoredAsoKeyword[];
   appKeywords: StoredAppKeyword[];
-  ownedAppIds: Set<string>;
+  associatedAppIds: Set<string>;
+  orderRelevantAppIds: Set<string>;
   nowMs: number;
-  difficultyEntitled?: boolean;
 }): KeywordRefreshItem[] {
-  const difficultyEntitled = params.difficultyEntitled ?? true;
   const associatedKeywords = new Set(
     params.appKeywords
-      .filter((row) => params.ownedAppIds.has(row.appId))
+      .filter((row) => params.associatedAppIds.has(row.appId))
+      .map((row) => normalizeKeyword(row.keyword))
+      .filter(Boolean)
+  );
+  const orderRelevantKeywords = new Set(
+    params.appKeywords
+      .filter((row) => params.orderRelevantAppIds.has(row.appId))
       .map((row) => normalizeKeyword(row.keyword))
       .filter(Boolean)
   );
@@ -82,16 +86,13 @@ export function selectKeywordRefreshCandidates(params: {
         keyword,
         params.nowMs
       );
-      const complete = isCompleteStoredAsoKeyword(keyword);
-      const missingDifficultyOnly = !complete && orderFresh && popularityFresh;
-      if (
-        !difficultyEntitled &&
-        missingDifficultyOnly &&
-        isPaywalledStoredAsoKeyword(keyword)
-      ) {
+      if (!isCompleteStoredAsoKeyword(keyword) || !popularityFresh) {
+        return true;
+      }
+      if (!orderRelevantKeywords.has(keyword.normalizedKeyword)) {
         return false;
       }
-      return !complete || !orderFresh || !popularityFresh;
+      return !orderFresh;
     })
     .map((keyword) => ({
       keyword: keyword.keyword,
@@ -170,20 +171,12 @@ export function createStartupRefreshManager(
   };
 
   const refreshKeywordsInBatches = async (): Promise<void> => {
-    let difficultyEntitled = true;
-    if (deps.isDifficultyEntitled) {
-      try {
-        difficultyEntitled = await deps.isDifficultyEntitled();
-      } catch {
-        difficultyEntitled = true;
-      }
-    }
     const items = selectKeywordRefreshCandidates({
       keywords: deps.listKeywords(deps.country),
       appKeywords: deps.listAppKeywords(deps.country),
-      ownedAppIds: deps.listOwnedAppIds(),
+      associatedAppIds: deps.listAssociatedAppIds(),
+      orderRelevantAppIds: deps.listOrderRelevantAppIds(),
       nowMs: nowMs(),
-      difficultyEntitled,
     });
     state.counters.eligibleKeywordCount = items.length;
     if (items.length === 0) return;

@@ -7,7 +7,6 @@ import { enrichKeyword } from "./services/aso-enrichment-service";
 import { normalizeKeyword, sanitizeKeywords } from "./services/aso-keyword-utils";
 import { getAsoAppDocs as getAsoAppDocsFromService } from "./services/aso-app-doc-service";
 import { ASO_MAX_KEYWORDS } from "../../shared/aso-keyword-limits";
-import { asoBackendClient } from "../backend/aso-backend-client";
 import type {
   AsoAppDoc,
   AsoCacheRepository,
@@ -18,7 +17,6 @@ import {
   assertSupportedCountry,
   normalizeCountry,
 } from "../../domain/keywords/policy";
-import type { AsoDifficultyState } from "../../shared/aso-difficulty-state";
 
 const CacheLookupRequestSchema = z.object({
   country: z.string().default(DEFAULT_ASO_COUNTRY),
@@ -120,40 +118,15 @@ export async function enrichAsoKeywords(
   const settled = await mapSettledWithConcurrency(
     validated.items,
     getAsoResilienceConfig().keywordEnrichmentConcurrency,
-    async (item) => {
-      const enriched = await enrichKeyword(
+    (item) =>
+      enrichKeyword(
         {
           keyword: item.keyword,
           popularity: item.popularity,
           country,
         },
         getAppDocs ? { getAppDocs } : undefined
-      );
-      const score = await asoBackendClient.scoreDifficulty({
-        keyword: enriched.keyword,
-        country,
-        popularity: enriched.popularity,
-        appCount: enriched.appCount,
-        orderedAppIds: enriched.orderedAppIds,
-        appDocs: (enriched.appDocs ?? []).map((doc) => ({
-          appId: doc.appId,
-          name: doc.name,
-          subtitle: doc.subtitle,
-          averageUserRating: doc.averageUserRating,
-          userRatingCount: doc.userRatingCount,
-          releaseDate: doc.releaseDate ?? null,
-          currentVersionReleaseDate: doc.currentVersionReleaseDate ?? null,
-          additionalLocalizations: doc.additionalLocalizations,
-        })),
-      });
-      const difficultyState: AsoDifficultyState =
-        score.difficultyState === "ready" ? "ready" : "paywalled";
-      return {
-        ...enriched,
-        difficultyScore: score.difficultyScore,
-        difficultyState,
-      };
-    }
+      )
   );
 
   const enriched = settled.flatMap((entry) =>
@@ -200,8 +173,10 @@ export async function enrichAsoKeywords(
             keyword: e.keyword,
             popularity: e.popularity,
             difficultyScore: e.difficultyScore,
-            difficultyState: e.difficultyState,
+            minDifficultyScore: e.minDifficultyScore,
+            isBrandKeyword: e.isBrandKeyword ?? null,
             appCount: e.appCount,
+            keywordMatch: e.keywordMatch,
             orderedAppIds: e.orderedAppIds,
           })),
           appDocs: normalizedAppDocs,

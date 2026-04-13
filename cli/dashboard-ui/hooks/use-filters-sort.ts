@@ -3,6 +3,8 @@ import { getChange } from "../app-helpers";
 import {
   DASHBOARD_FILTER_BOUNDS,
   DASHBOARD_FILTER_DEFAULTS,
+  type DashboardBrandFilter,
+  type DashboardFavoriteFilter,
 } from "../filter-constants";
 
 export type SortKey =
@@ -37,6 +39,14 @@ function isSortKey(value: unknown): value is SortKey {
 
 function isSortDir(value: unknown): value is SortDir {
   return value === "asc" || value === "desc";
+}
+
+function isBrandFilter(value: unknown): value is DashboardBrandFilter {
+  return value === "all" || value === "brand" || value === "non_brand";
+}
+
+function isFavoriteFilter(value: unknown): value is DashboardFavoriteFilter {
+  return value === "all" || value === "favorite" || value === "non_favorite";
 }
 
 function getStoredSortState(): { key: SortKey; dir: SortDir } {
@@ -94,6 +104,14 @@ function getStoredFilterState(): typeof DEFAULT_FILTER_STATE {
       DASHBOARD_FILTER_BOUNDS.maxRank.min,
       DASHBOARD_FILTER_BOUNDS.maxRank.max
     );
+    const parsedBrand = (parsed as { brand?: unknown }).brand;
+    const brand = isBrandFilter(parsedBrand)
+      ? parsedBrand
+      : DEFAULT_FILTER_STATE.brand;
+    const parsedFavorite = (parsed as { favorite?: unknown }).favorite;
+    const favorite = isFavoriteFilter(parsedFavorite)
+      ? parsedFavorite
+      : DEFAULT_FILTER_STATE.favorite;
 
     if (
       minPopularity == null ||
@@ -108,6 +126,8 @@ function getStoredFilterState(): typeof DEFAULT_FILTER_STATE {
     return {
       minPopularity,
       maxDifficulty,
+      brand,
+      favorite,
       minRank,
       maxRank,
     };
@@ -120,6 +140,8 @@ type FilterableRow = {
   keyword: string;
   popularity: number;
   difficultyScore: number | null;
+  isBrandKeyword: boolean | null;
+  isFavorite: boolean;
   appCount: number | null;
   updatedAt?: string;
   previousPosition: number | null;
@@ -130,6 +152,7 @@ type FilterableRow = {
 type UseFiltersSortParams = {
   keywords: FilterableRow[];
   showRankingColumns: boolean;
+  mode?: "local" | "server";
 };
 
 export function useFiltersSort(params: UseFiltersSortParams) {
@@ -137,6 +160,8 @@ export function useFiltersSort(params: UseFiltersSortParams) {
   const [keywordFilter, setKeywordFilter] = useState("");
   const [maxDifficulty, setMaxDifficulty] = useState(initialFilterState.maxDifficulty);
   const [minPopularity, setMinPopularity] = useState(initialFilterState.minPopularity);
+  const [brandFilter, setBrandFilter] = useState(initialFilterState.brand);
+  const [favoriteFilter, setFavoriteFilter] = useState(initialFilterState.favorite);
   const [minRank, setMinRank] = useState(initialFilterState.minRank);
   const [maxRank, setMaxRank] = useState(initialFilterState.maxRank);
   const [sortBy, setSortBy] = useState<SortKey>(() => getStoredSortState().key);
@@ -159,6 +184,8 @@ export function useFiltersSort(params: UseFiltersSortParams) {
         JSON.stringify({
           maxDifficulty,
           minPopularity,
+          brand: brandFilter,
+          favorite: favoriteFilter,
           minRank,
           maxRank,
         })
@@ -166,7 +193,7 @@ export function useFiltersSort(params: UseFiltersSortParams) {
     } catch {
       // no-op
     }
-  }, [maxDifficulty, minPopularity, minRank, maxRank]);
+  }, [maxDifficulty, minPopularity, brandFilter, favoriteFilter, minRank, maxRank]);
 
   useEffect(() => {
     if (params.showRankingColumns) return;
@@ -176,9 +203,15 @@ export function useFiltersSort(params: UseFiltersSortParams) {
   }, [params.showRankingColumns, sortBy]);
 
   const filteredRows = useMemo(() => {
+    if (params.mode === "server") {
+      return params.keywords;
+    }
+
     const term = keywordFilter.trim().toLowerCase();
     const hasPopularityMinBound = minPopularity > DEFAULT_FILTER_STATE.minPopularity;
     const hasDifficultyMaxBound = maxDifficulty < DEFAULT_FILTER_STATE.maxDifficulty;
+    const hasBrandFilter = brandFilter !== DEFAULT_FILTER_STATE.brand;
+    const hasFavoriteFilter = favoriteFilter !== DEFAULT_FILTER_STATE.favorite;
     const hasRankLowerBound = minRank > DEFAULT_FILTER_STATE.minRank;
     const hasRankUpperBound = maxRank !== DEFAULT_FILTER_STATE.maxRank;
     const hasRankFilter =
@@ -194,6 +227,14 @@ export function useFiltersSort(params: UseFiltersSortParams) {
         return false;
       }
       if (hasPopularityMinBound && row.popularity <= minPopularity) return false;
+      if (hasBrandFilter) {
+        if (brandFilter === "brand" && row.isBrandKeyword !== true) return false;
+        if (brandFilter === "non_brand" && row.isBrandKeyword !== false) return false;
+      }
+      if (hasFavoriteFilter) {
+        if (favoriteFilter === "favorite" && row.isFavorite !== true) return false;
+        if (favoriteFilter === "non_favorite" && row.isFavorite === true) return false;
+      }
       if (hasRankFilter) {
         if (row.currentPosition == null) return false;
         if (hasRankLowerBound && row.currentPosition <= minRank) return false;
@@ -237,11 +278,14 @@ export function useFiltersSort(params: UseFiltersSortParams) {
 
     return rows;
   }, [
+    params.mode,
     params.keywords,
     params.showRankingColumns,
     keywordFilter,
     maxDifficulty,
     minPopularity,
+    brandFilter,
+    favoriteFilter,
     minRank,
     maxRank,
     sortBy,
@@ -255,6 +299,10 @@ export function useFiltersSort(params: UseFiltersSortParams) {
     setMaxDifficulty,
     minPopularity,
     setMinPopularity,
+    brandFilter,
+    setBrandFilter,
+    favoriteFilter,
+    setFavoriteFilter,
     minRank,
     setMinRank,
     maxRank,

@@ -30,8 +30,10 @@ erDiagram
     TEXT keyword
     REAL popularity
     REAL difficulty_score
-    TEXT difficulty_state
+    REAL min_difficulty_score
+    INTEGER is_brand_keyword
     INTEGER app_count
+    TEXT keyword_match
     TEXT ordered_app_ids
     TEXT created_at
     TEXT updated_at
@@ -44,6 +46,7 @@ erDiagram
     TEXT app_id PK
     TEXT name
     TEXT subtitle
+    TEXT publisher_name
     REAL average_user_rating
     INTEGER user_rating_count
     TEXT release_date
@@ -58,8 +61,17 @@ erDiagram
     TEXT app_id PK
     TEXT keyword PK
     TEXT country PK
+    INTEGER is_favorite
     INTEGER previous_position
     TEXT added_at
+  }
+
+  APP_KEYWORD_POSITION_HISTORY {
+    TEXT app_id PK
+    TEXT keyword PK
+    TEXT country PK
+    INTEGER position
+    TEXT captured_at PK
   }
 
   METADATA {
@@ -85,6 +97,7 @@ erDiagram
 
   OWNED_APPS ||--o{ OWNED_APP_COUNTRY_RATINGS : "app_id link"
   OWNED_APPS ||--o{ APP_KEYWORDS : "logical app_id link"
+  APP_KEYWORDS ||--o{ APP_KEYWORD_POSITION_HISTORY : "logical app+keyword history"
   ASO_KEYWORDS ||--o{ APP_KEYWORDS : "logical country+keyword link"
   ASO_KEYWORDS ||--o| ASO_KEYWORD_FAILURES : "logical country+normalized_keyword link"
   ASO_KEYWORDS ||--o{ ASO_APPS : "ordered_app_ids[] contains app_id"
@@ -131,8 +144,10 @@ Indexes:
 | `keyword` | `TEXT` | `string` | No | Display keyword |
 | `popularity` | `REAL` | `number` | No | Search Ads popularity |
 | `difficulty_score` | `REAL` | `number \| null` | Yes | Rounded integer semantics on write |
-| `difficulty_state` | `TEXT` | `"pending" \| "ready" \| "failed" \| "paywalled"` | No | Internal orchestration state for difficulty lifecycle |
+| `min_difficulty_score` | `REAL` | `number \| null` | Yes | Rounded integer semantics on write |
+| `is_brand_keyword` | `INTEGER` | `boolean \| null` | Yes | `1` brand, `0` non-brand, `NULL` not computed yet |
 | `app_count` | `INTEGER` | `number \| null` | Yes | Ordered app count |
+| `keyword_match` | `TEXT` | `"none" \| "titleExactPhrase" \| "titleAllWords" \| "subtitleExactPhrase" \| "combinedPhrase" \| "subtitleAllWords" \| null` | Yes | Best (highest-ranked) keyword match enum across top 5 apps |
 | `ordered_app_ids` | `TEXT` | `string[]` | No | JSON-encoded app id list |
 | `created_at` | `TEXT` | `string` | No | ISO datetime |
 | `updated_at` | `TEXT` | `string` | No | ISO datetime |
@@ -152,6 +167,7 @@ Competitor app-doc cache only (country-scoped).
 | `app_id` | `TEXT` | `string` | No | PK part |
 | `name` | `TEXT` | `string` | No | App name |
 | `subtitle` | `TEXT` | `string \| null` | Yes | App subtitle |
+| `publisher_name` | `TEXT` | `string \| null` | Yes | Canonical publisher/developer cache for brand detection |
 | `average_user_rating` | `REAL` | `number` | No | Rating |
 | `user_rating_count` | `INTEGER` | `number` | No | Rating count |
 | `release_date` | `TEXT` | `string \| null` | Yes | Release date |
@@ -170,13 +186,30 @@ Indexes:
 | `app_id` | `TEXT` | `string` | No | PK part; logical link to `owned_apps.id` |
 | `keyword` | `TEXT` | `string` | No | PK part; normalized keyword |
 | `country` | `TEXT` | `string` | No | PK part |
+| `is_favorite` | `INTEGER` | `boolean` | No | App-scoped favorite flag (`1` favorite / `0` non-favorite) |
 | `previous_position` | `INTEGER` | `number \| null` | Yes | Rank delta baseline |
 | `added_at` | `TEXT` | `string \| null` | Yes | Association timestamp |
 
 Indexes:
 - PK: (`app_id`, `keyword`, `country`)
 - `idx_app_keywords_country_app`: (`country`, `app_id`)
+- `idx_app_keywords_country_app_favorite`: (`country`, `app_id`, `is_favorite`)
 - `idx_app_keywords_country_keyword`: (`country`, `keyword`)
+
+### `app_keyword_position_history`
+Append-only rank snapshots for associated `(app, keyword, country)` rows.
+
+| Column | SQLite Type | TS Type | Nullable | Notes |
+|---|---|---|---|---|
+| `app_id` | `TEXT` | `string` | No | PK part |
+| `keyword` | `TEXT` | `string` | No | PK part; normalized keyword |
+| `country` | `TEXT` | `string` | No | PK part |
+| `position` | `INTEGER` | `number \| null` | Yes | Captured rank (smaller is better) |
+| `captured_at` | `TEXT` | `string` | No | PK part; ISO datetime capture point |
+
+Indexes:
+- PK: (`app_id`, `keyword`, `country`, `captured_at`)
+- `idx_app_keyword_position_history_lookup`: (`country`, `app_id`, `keyword`, `captured_at`)
 
 ### `metadata`
 | Column | SQLite Type | TS Type | Nullable | Notes |
@@ -187,6 +220,7 @@ Indexes:
 
 Known runtime key:
 - `aso-popularity-adam-id`
+- `app-keyword-position-history-pruned-at` (daily prune watermark for 90-day history retention)
 
 ### `aso_keyword_failures`
 | Column | SQLite Type | TS Type | Nullable | Notes |

@@ -20,9 +20,9 @@ import {
   isCompleteStoredAsoKeyword,
   isStoredKeywordCacheHit,
 } from "../../../shared/aso-keyword-validity";
+import type { KeywordMatchType } from "../../../shared/aso-keyword-match";
 import { keywordWriteRepository } from "../../keywords/keyword-write-repository";
 import { normalizeCountry } from "../../../domain/keywords/policy";
-import type { AsoDifficultyState } from "../../../shared/aso-difficulty-state";
 
 function isFiniteFutureIso(iso: string | undefined, nowMs: number): boolean {
   if (!iso) return false;
@@ -36,6 +36,7 @@ function toAsoAppDoc(row: ReturnType<typeof getCompetitorAppDocs>[number]): AsoA
     country: row.country,
     name: row.name,
     subtitle: row.subtitle,
+    publisherName: row.publisherName,
     averageUserRating: row.averageUserRating,
     userRatingCount: row.userRatingCount,
     releaseDate: row.releaseDate,
@@ -74,9 +75,11 @@ export class LocalAsoCacheRepository implements AsoCacheRepository {
     items: Array<{
       keyword: string;
       popularity: number;
-      difficultyScore: number | null;
-      difficultyState?: AsoDifficultyState;
-      appCount: number | null;
+      difficultyScore: number;
+      minDifficultyScore: number;
+      isBrandKeyword?: boolean | null;
+      appCount: number;
+      keywordMatch: KeywordMatchType;
       orderedAppIds: string[];
     }>;
     appDocs?: AsoAppDoc[];
@@ -93,8 +96,10 @@ export class LocalAsoCacheRepository implements AsoCacheRepository {
         normalizedKeyword: item.normalizedKeyword,
         popularity: item.popularity,
         difficultyScore: item.difficultyScore,
-        difficultyState: item.difficultyState,
+        minDifficultyScore: item.minDifficultyScore,
+        isBrandKeyword: item.isBrandKeyword ?? null,
         appCount: item.appCount,
+        keywordMatch: item.keywordMatch,
         orderedAppIds: item.orderedAppIds,
       }))
     );
@@ -106,6 +111,7 @@ export class LocalAsoCacheRepository implements AsoCacheRepository {
           appId: app.appId,
           name: app.name,
           subtitle: app.subtitle,
+          publisherName: app.publisherName,
           averageUserRating: app.averageUserRating,
           userRatingCount: app.userRatingCount,
           releaseDate: app.releaseDate,
@@ -149,10 +155,10 @@ export class LocalAsoCacheRepository implements AsoCacheRepository {
         country,
         popularity: fallback.popularity,
         difficultyScore: fallback.difficultyScore,
-        difficultyState:
-          fallback.difficultyState ??
-          (fallback.difficultyScore == null ? "pending" : "ready"),
+        minDifficultyScore: fallback.minDifficultyScore,
+        isBrandKeyword: fallback.isBrandKeyword ?? null,
         appCount: fallback.appCount,
+        keywordMatch: fallback.keywordMatch,
         orderedAppIds: fallback.orderedAppIds,
         createdAt: now,
         updatedAt: now,

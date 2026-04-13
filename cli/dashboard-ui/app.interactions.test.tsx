@@ -46,12 +46,35 @@ function withAppKinds(apps: AppRow[]): Array<AppRow & { kind: AppKind }> {
   });
 }
 
+function toKeywordPagedPayload(items: unknown[]) {
+  const statuses = items.map((item) => {
+    const row = item as { keywordStatus?: string; difficultyScore?: number | null };
+    if (row.keywordStatus === "failed") return "failed";
+    if (row.keywordStatus === "pending") return "pending";
+    if (row.keywordStatus === "ok") return "ok";
+    return row.difficultyScore == null ? "pending" : "ok";
+  });
+  return {
+    items,
+    page: 1,
+    pageSize: 100,
+    totalCount: items.length,
+    totalPages: 1,
+    hasPrevPage: false,
+    hasNextPage: false,
+    associatedCount: items.length,
+    failedCount: statuses.filter((status) => status === "failed").length,
+    pendingCount: statuses.filter((status) => status === "pending").length,
+  };
+}
+
 function buildFetchMock(params: {
   initialApps: AppRow[];
   afterAddApps?: AppRow[];
   keywordsByAppId: Record<string, unknown[]>;
   appDocsById?: Record<string, unknown>;
   topAppsByKeyword?: Record<string, unknown>;
+  historyByKeyword?: Record<string, { points: unknown[] }>;
   appSearchByTerm?: Record<string, { appDocs: unknown[] }>;
   onPostApps?: (payload: any) => void;
   onDeleteApps?: (payload: any) => void;
@@ -106,7 +129,21 @@ function buildFetchMock(params: {
       const appId = query.get("appId") ?? "";
       return jsonResponse(200, {
         success: true,
-        data: params.keywordsByAppId[appId] ?? [],
+        data: toKeywordPagedPayload(params.keywordsByAppId[appId] ?? []),
+      });
+    }
+
+    if (method === "GET" && url.startsWith("/api/aso/keywords/history?")) {
+      const query = new URLSearchParams(url.split("?")[1] ?? "");
+      const keyword = decodeURIComponent(query.get("keyword") ?? "");
+      const appId = query.get("appId") ?? "";
+      return jsonResponse(200, {
+        success: true,
+        data: {
+          appId,
+          keyword,
+          points: params.historyByKeyword?.[keyword]?.points ?? [],
+        },
       });
     }
 
@@ -330,6 +367,57 @@ describe("dashboard app interactions", () => {
 
     await screen.findByText("healthy-term");
     expect(screen.queryByRole("button", { name: /Retry Failed/i })).toBeNull();
+  });
+
+  it("opens position history dialog from rank/change cells", async () => {
+    const fetchMock = buildFetchMock({
+      initialApps: [
+        { id: DEFAULT_RESEARCH_APP_ID, name: "Research" },
+        { id: "111", name: "Owned App" },
+      ],
+      keywordsByAppId: {
+        "111": [
+          {
+            keyword: "meditation",
+            popularity: 60,
+            difficultyScore: 40,
+            appCount: 88,
+            positions: [{ appId: "111", previousPosition: 6, currentPosition: 4 }],
+            updatedAt: "2026-03-10T11:00:00.000Z",
+          },
+        ],
+      },
+      historyByKeyword: {
+        meditation: {
+          points: [
+            {
+              capturedAt: "2026-03-01T11:00:00.000Z",
+              position: 9,
+            },
+            {
+              capturedAt: "2026-03-10T11:00:00.000Z",
+              position: 4,
+            },
+          ],
+        },
+      },
+    });
+    global.fetch = fetchMock as typeof fetch;
+    localStorage.setItem("aso-dashboard:selected-app-id", "111");
+
+    render(<App />);
+
+    const keywordCell = await screen.findByText("meditation");
+    const row = keywordCell.closest("tr") as HTMLElement;
+    const rankCell = within(row).getAllByRole("cell")[6];
+    const rankTrigger = within(rankCell).getByRole("button", { name: "4" });
+    fireEvent.click(rankTrigger);
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Position history for meditation",
+    });
+    expect(within(dialog).getByText(/Best rank:/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Worst rank:/)).toBeInTheDocument();
   });
 
   it("opens top apps dialog and supports context delete", async () => {

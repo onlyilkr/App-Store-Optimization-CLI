@@ -13,6 +13,8 @@ type AsoToolKeywordItem = {
   popularity?: unknown;
   difficulty?: unknown;
   difficultyScore?: unknown;
+  minDifficultyScore?: unknown;
+  isBrandKeyword?: unknown;
 };
 
 export const asoEvaluateKeywordsInputSchema = z.object({
@@ -108,16 +110,36 @@ function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function asBoolean(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+    if (normalized === "1") return true;
+    if (normalized === "0") return false;
+  }
+  return null;
+}
+
 function mapAsoResultItem(raw: unknown): {
   keyword: string;
   popularity: number | null;
   difficulty: number | null;
+  minDifficultyScore: number | null;
+  isBrandKeyword: boolean | null;
 } {
   const item = (raw ?? {}) as AsoToolKeywordItem;
   return {
     keyword: asString(item.keyword),
     popularity: asNumber(item.popularity),
     difficulty: asNumber(item.difficulty ?? item.difficultyScore),
+    minDifficultyScore: asNumber(item.minDifficultyScore),
+    isBrandKeyword: asBoolean(item.isBrandKeyword),
   };
 }
 
@@ -230,7 +252,7 @@ export async function handleAsoEvaluateKeywords(args: AsoEvaluateKeywordsArgs) {
     .map(mapAsoResultItem)
     .filter((item) => item.keyword !== "")
     .flatMap((item) => {
-      if (item.popularity == null) {
+      if (item.popularity == null || item.difficulty == null) {
         return [];
       }
       return [
@@ -238,6 +260,8 @@ export async function handleAsoEvaluateKeywords(args: AsoEvaluateKeywordsArgs) {
           keyword: item.keyword,
           popularity: item.popularity,
           difficulty: item.difficulty,
+          minDifficultyScore: item.minDifficultyScore,
+          isBrandKeyword: item.isBrandKeyword ?? false,
         },
       ];
     });

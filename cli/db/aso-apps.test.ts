@@ -41,6 +41,7 @@ describe("aso-apps", () => {
       {
         appId: "comp1",
         name: "Competitor App",
+        publisherName: "Publisher One",
         averageUserRating: 4.7,
         userRatingCount: 500,
         additionalLocalizations: {
@@ -57,6 +58,7 @@ describe("aso-apps", () => {
       expect.objectContaining({
         appId: "comp1",
         name: "Competitor App",
+        publisherName: "Publisher One",
         country: "US",
         averageUserRating: 4.7,
         userRatingCount: 500,
@@ -75,6 +77,7 @@ describe("aso-apps", () => {
       {
         appId: "same-country-id",
         name: "US App",
+        publisherName: "US Publisher",
         averageUserRating: 4,
         userRatingCount: 100,
       },
@@ -83,6 +86,7 @@ describe("aso-apps", () => {
       {
         appId: "same-country-id",
         name: "GB App",
+        publisherName: "GB Publisher",
         averageUserRating: 3,
         userRatingCount: 20,
       },
@@ -91,6 +95,7 @@ describe("aso-apps", () => {
     expect(getCompetitorAppDocs("US", ["same-country-id"])[0]).toEqual(
       expect.objectContaining({
         name: "US App",
+        publisherName: "US Publisher",
         country: "US",
         averageUserRating: 4,
       })
@@ -98,6 +103,7 @@ describe("aso-apps", () => {
     expect(getCompetitorAppDocs("GB", ["same-country-id"])[0]).toEqual(
       expect.objectContaining({
         name: "GB App",
+        publisherName: "GB Publisher",
         country: "GB",
         averageUserRating: 3,
       })
@@ -109,6 +115,7 @@ describe("aso-apps", () => {
       {
         appId: "same-id",
         name: "Initial",
+        publisherName: "Initial Publisher",
         averageUserRating: 4,
         userRatingCount: 10,
         additionalLocalizations: {
@@ -123,6 +130,7 @@ describe("aso-apps", () => {
       {
         appId: "same-id",
         name: "Updated",
+        publisherName: "Updated Publisher",
         averageUserRating: 4.5,
         userRatingCount: 40,
         releaseDate: "2026-01-01",
@@ -132,6 +140,7 @@ describe("aso-apps", () => {
     expect(getCompetitorAppDocs("US", ["same-id"])[0]).toEqual(
       expect.objectContaining({
         name: "Updated",
+        publisherName: "Updated Publisher",
         averageUserRating: 4.5,
         userRatingCount: 40,
         releaseDate: "2026-01-01",

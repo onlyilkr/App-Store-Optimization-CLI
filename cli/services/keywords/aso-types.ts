@@ -2,13 +2,14 @@ import type {
   FailedKeyword,
   FailedKeywordStage,
 } from "../../shared/aso-keyword-types";
-import type { AsoDifficultyState } from "../../shared/aso-difficulty-state";
+import type { KeywordMatchType } from "../../shared/aso-keyword-match";
 
 export interface AsoAppDocItem {
   appId: string;
   country: string;
   name: string;
   subtitle?: string;
+  publisherName?: string;
   averageUserRating: number;
   userRatingCount: number;
   releaseDate?: string | null;
@@ -22,9 +23,11 @@ export interface AsoAppDocItem {
 export interface AsoKeywordItem {
   keyword: string;
   popularity: number;
-  difficultyScore: number | null;
-  difficultyState: AsoDifficultyState;
-  appCount: number | null;
+  difficultyScore: number;
+  minDifficultyScore: number;
+  isBrandKeyword: boolean | null;
+  appCount: number;
+  keywordMatch: KeywordMatchType;
   orderedAppIds: string[];
   createdAt?: string;
   updatedAt?: string;
@@ -44,6 +47,8 @@ export interface FilteredKeyword {
   reason: FilteredKeywordReason;
   popularity?: number;
   difficulty?: number;
+  minDifficultyScore?: number | null;
+  isBrandKeyword?: boolean | null;
 }
 
 export interface KeywordFetchResult {

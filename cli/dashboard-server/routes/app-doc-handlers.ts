@@ -8,13 +8,14 @@ import {
   getAsoAppDocsLocal,
   refreshAsoKeywordOrderLocal,
 } from "../../services/keywords/aso-local-cache-service";
+import { keywordPipelineService } from "../../services/keywords/keyword-pipeline-service";
 import { chunkArray, getMissingOrExpiredAppIds } from "../refresh-utils";
 import {
   DEFAULT_ASO_COUNTRY,
   normalizeCountry,
 } from "../../domain/keywords/policy";
 import type { AsoApiAppDoc, AsoRouteDeps } from "./aso-route-types";
-import { asoBackendClient } from "../../services/backend/aso-backend-client";
+import { isStoredKeywordOrderFresh } from "../../shared/aso-keyword-validity";
 
 const ASO_APP_DOCS_MAX_BATCH_SIZE = 50;
 const ASO_APP_SEARCH_DEFAULT_LIMIT = 20;
@@ -37,6 +38,10 @@ function mergeHydratedCompetitorDoc(
       incoming.subtitle && incoming.subtitle.trim() !== ""
         ? incoming.subtitle
         : existing?.subtitle,
+    publisherName:
+      incoming.publisherName && incoming.publisherName.trim() !== ""
+        ? incoming.publisherName
+        : existing?.publisherName,
     averageUserRating: incoming.averageUserRating,
     userRatingCount: incoming.userRatingCount,
     releaseDate,
@@ -221,26 +226,31 @@ export function createAppDocHandlers(deps: AsoRouteDeps) {
     const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
       ? Math.min(requestedLimit, 50)
       : 10;
-    const topAppsEntitlement = await asoBackendClient.isTopAppsEntitled();
-    if (!topAppsEntitlement.allowed) {
-      const message = topAppsEntitlement.upgradeUrl
-        ? `${topAppsEntitlement.message} Upgrade: ${topAppsEntitlement.upgradeUrl}`
-        : topAppsEntitlement.message ?? "Top apps requires an active plan.";
-      deps.sendApiError(
-        res,
-        402,
-        topAppsEntitlement.code ?? "PLAN_REQUIRED",
-        message
-      );
-      return;
-    }
     const decoded = keyword.trim();
-    const kw = getKeyword(country, decoded);
-    if (!kw) {
+    let keywordRow = getKeyword(country, decoded);
+    if (!keywordRow) {
       deps.sendApiError(res, 404, "NOT_FOUND", "Keyword not found.");
       return;
     }
-    const topIds = kw.orderedAppIds.slice(0, limit);
+    if (!isStoredKeywordOrderFresh(keywordRow, Date.now())) {
+      try {
+        await keywordPipelineService.refreshOrder(country, [decoded]);
+        const refreshed = getKeyword(country, decoded);
+        if (refreshed) {
+          keywordRow = refreshed;
+        }
+      } catch (error) {
+        deps.reportDashboardError(error, {
+          method: "GET",
+          path: "/api/aso/top-apps",
+          country,
+          keyword: decoded,
+          context: "top-apps-order-refresh",
+        });
+      }
+    }
+
+    const topIds = keywordRow.orderedAppIds.slice(0, limit);
     let appDocs = getCompetitorAppDocs(country, topIds);
     const cachedById = new Map(appDocs.map((doc) => [doc.appId, doc]));
     const missingIds = getMissingOrExpiredAppIds(topIds, appDocs);
@@ -260,6 +270,7 @@ export function createAppDocHandlers(deps: AsoRouteDeps) {
                 appId: merged.appId,
                 name: merged.name,
                 subtitle: merged.subtitle,
+                publisherName: merged.publisherName,
                 averageUserRating: merged.averageUserRating,
                 userRatingCount: merged.userRatingCount,
                 releaseDate: merged.releaseDate ?? null,
@@ -283,7 +294,10 @@ export function createAppDocHandlers(deps: AsoRouteDeps) {
       }
     }
     appDocs = getCompetitorAppDocs(country, topIds);
-    deps.sendJson(res, 200, { success: true, data: { keyword: kw.keyword, appDocs } });
+    deps.sendJson(res, 200, {
+      success: true,
+      data: { keyword: keywordRow.keyword, appDocs },
+    });
   }
 
   function handleApiAsoAppsGet(
@@ -329,6 +343,7 @@ export function createAppDocHandlers(deps: AsoRouteDeps) {
                 appId: merged.appId,
                 name: merged.name,
                 subtitle: merged.subtitle,
+                publisherName: merged.publisherName,
                 averageUserRating: merged.averageUserRating,
                 userRatingCount: merged.userRatingCount,
                 releaseDate: merged.releaseDate ?? null,

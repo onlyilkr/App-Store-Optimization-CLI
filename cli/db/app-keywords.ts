@@ -7,29 +7,51 @@ import {
 
 const COUNTRY = DEFAULT_ASO_COUNTRY;
 
+type AppKeywordRow = {
+  appId: string;
+  keyword: string;
+  country: string;
+  isFavorite: number | null;
+  previousPosition: number | null;
+  addedAt?: string | null;
+};
+
+function toStoredAppKeyword(row: AppKeywordRow): StoredAppKeyword {
+  return {
+    appId: row.appId,
+    keyword: row.keyword,
+    country: row.country,
+    isFavorite: row.isFavorite === 1,
+    previousPosition: row.previousPosition,
+    addedAt: row.addedAt ?? undefined,
+  };
+}
+
 export function listByApp(appId: string, country: string = COUNTRY): StoredAppKeyword[] {
   const db = getDb();
-  return db
+  const rows = db
     .prepare(
-      `SELECT app_id as appId, keyword, country, previous_position as previousPosition,
+      `SELECT app_id as appId, keyword, country, is_favorite as isFavorite, previous_position as previousPosition,
               added_at as addedAt
        FROM app_keywords
        WHERE app_id = ? AND country = ?
        ORDER BY keyword COLLATE NOCASE ASC`
     )
-    .all(appId, country) as StoredAppKeyword[];
+    .all(appId, country) as AppKeywordRow[];
+  return rows.map(toStoredAppKeyword);
 }
 
 export function listAllAppKeywords(country: string = COUNTRY): StoredAppKeyword[] {
   const db = getDb();
-  return db
+  const rows = db
     .prepare(
-      `SELECT app_id as appId, keyword, country, previous_position as previousPosition,
+      `SELECT app_id as appId, keyword, country, is_favorite as isFavorite, previous_position as previousPosition,
               added_at as addedAt
        FROM app_keywords
        WHERE country = ?`
     )
-    .all(country) as StoredAppKeyword[];
+    .all(country) as AppKeywordRow[];
+  return rows.map(toStoredAppKeyword);
 }
 
 export function createAppKeyword(
@@ -42,9 +64,9 @@ export function createAppKeyword(
   const db = getDb();
   db.prepare(
     `INSERT OR IGNORE INTO app_keywords (
-      app_id, keyword, country, previous_position, added_at
+      app_id, keyword, country, is_favorite, previous_position, added_at
     )
-    VALUES (?, ?, ?, NULL, ?)`
+    VALUES (?, ?, ?, 0, NULL, ?)`
   ).run(appId, norm, country, new Date().toISOString());
 }
 
@@ -57,9 +79,9 @@ export function createAppKeywords(
   const db = getDb();
   const stmt = db.prepare(
     `INSERT OR IGNORE INTO app_keywords (
-      app_id, keyword, country, previous_position, added_at
+      app_id, keyword, country, is_favorite, previous_position, added_at
     )
-    VALUES (?, ?, ?, NULL, ?)`
+    VALUES (?, ?, ?, 0, NULL, ?)`
   );
   const now = new Date().toISOString();
   const tx = db.transaction(() => {
@@ -93,14 +115,34 @@ export function getAssociationsForKeyword(
 ): StoredAppKeyword[] {
   const db = getDb();
   const norm = normalizeKeyword(keyword);
-  return db
+  const rows = db
     .prepare(
-      `SELECT app_id as appId, keyword, country, previous_position as previousPosition,
+      `SELECT app_id as appId, keyword, country, is_favorite as isFavorite, previous_position as previousPosition,
               added_at as addedAt
        FROM app_keywords
        WHERE keyword = ? AND country = ?`
     )
-    .all(norm, country) as StoredAppKeyword[];
+    .all(norm, country) as AppKeywordRow[];
+  return rows.map(toStoredAppKeyword);
+}
+
+export function setAppKeywordFavorite(
+  appId: string,
+  keyword: string,
+  isFavorite: boolean,
+  country: string = COUNTRY
+): boolean {
+  const norm = normalizeKeyword(keyword);
+  if (!norm) return false;
+  const db = getDb();
+  const result = db
+    .prepare(
+      `UPDATE app_keywords
+       SET is_favorite = ?
+       WHERE app_id = ? AND keyword = ? AND country = ?`
+    )
+    .run(isFavorite ? 1 : 0, appId, norm, country);
+  return result.changes > 0;
 }
 
 export function deleteAppKeywords(

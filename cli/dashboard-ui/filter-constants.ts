@@ -1,6 +1,11 @@
+export type DashboardBrandFilter = "all" | "brand" | "non_brand";
+export type DashboardFavoriteFilter = "all" | "favorite" | "non_favorite";
+
 export type DashboardFilterState = {
   minPopularity: number;
   maxDifficulty: number;
+  brand: DashboardBrandFilter;
+  favorite: DashboardFavoriteFilter;
   minRank: number;
   maxRank: number;
 };
@@ -15,12 +20,14 @@ const RANK_MAX = 201;
 export const DASHBOARD_FILTER_DEFAULTS: DashboardFilterState = {
   minPopularity: POPULARITY_MIN,
   maxDifficulty: DIFFICULTY_MAX,
+  brand: "all",
+  favorite: "all",
   minRank: RANK_MIN,
   maxRank: RANK_MAX,
 };
 
 export const DASHBOARD_FILTER_BOUNDS: Record<
-  keyof DashboardFilterState,
+  "minPopularity" | "maxDifficulty" | "minRank" | "maxRank",
   { min: number; max: number }
 > = {
   minPopularity: { min: POPULARITY_MIN, max: POPULARITY_MAX },
@@ -32,6 +39,8 @@ export const DASHBOARD_FILTER_BOUNDS: Record<
 export const DASHBOARD_FILTER_OPTIONS = {
   popularity: [0, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, POPULARITY_MAX],
   difficulty: [0, 5, 10, 20, 30, 40, 50, 70, DIFFICULTY_MAX],
+  brand: ["all", "brand", "non_brand"] as const,
+  favorite: ["all", "favorite", "non_favorite"] as const,
   rank: [0, 5, 10, 20, 30, 40, 50, 75, 100, 150, RANK_MAX - 1, RANK_MAX],
 };
 

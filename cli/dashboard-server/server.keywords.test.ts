@@ -29,6 +29,7 @@ jest.mock("../db/app-keywords", () => ({
   createAppKeywords: jest.fn(),
   deleteAppKeywords: jest.fn(() => 0),
   getAppLastKeywordAddedAtMap: jest.fn(() => new Map()),
+  setAppKeywordFavorite: jest.fn(() => true),
 }));
 
 jest.mock("../db/aso-keyword-failures", () => ({

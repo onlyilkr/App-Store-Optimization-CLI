@@ -1,9 +1,10 @@
-import type { AsoDifficultyState } from "./aso-difficulty-state";
+import type { KeywordMatchType } from "./aso-keyword-match";
 
 type KeywordFreshnessFields = {
   difficultyScore: number | null;
-  difficultyState?: AsoDifficultyState;
+  minDifficultyScore: number | null;
   appCount: number | null;
+  keywordMatch: KeywordMatchType | null;
   orderExpiresAt: string;
   popularityExpiresAt: string;
 };
@@ -12,7 +13,9 @@ export type CompleteStoredAsoKeyword<
   T extends KeywordFreshnessFields = KeywordFreshnessFields,
 > = T & {
   difficultyScore: number;
+  minDifficultyScore: number;
   appCount: number;
+  keywordMatch: KeywordMatchType;
 };
 
 export function isFreshIso(iso: string | undefined, nowMs: number): boolean {
@@ -27,7 +30,9 @@ export function isCompleteStoredAsoKeyword<T extends KeywordFreshnessFields>(
   if (!keyword) return false;
   return (
     keyword.difficultyScore != null &&
-    keyword.appCount != null
+    keyword.minDifficultyScore != null &&
+    keyword.appCount != null &&
+    keyword.keywordMatch != null
   );
 }
 
@@ -54,10 +59,4 @@ export function isStoredKeywordCacheHit<T extends KeywordFreshnessFields>(
     isStoredKeywordOrderFresh(keyword, nowMs) &&
     isStoredKeywordPopularityFresh(keyword, nowMs)
   );
-}
-
-export function isPaywalledStoredAsoKeyword(
-  keyword: KeywordFreshnessFields | null | undefined
-): boolean {
-  return keyword?.difficultyState === "paywalled";
 }

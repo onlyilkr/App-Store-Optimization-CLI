@@ -1,7 +1,6 @@
 export type DashboardErrorCode =
   | "INVALID_REQUEST"
   | "PAYLOAD_TOO_LARGE"
-  | "PLAN_REQUIRED"
   | "MISSING_APPLE_CREDENTIALS"
   | "AUTH_REQUIRED"
   | "AUTH_IN_PROGRESS"
@@ -29,17 +28,6 @@ export function mapToDashboardUserSafeError(
 ): DashboardUserSafeError {
   const rawMessage = error instanceof Error ? error.message : String(error ?? "");
   const lower = rawMessage.toLowerCase();
-  const explicitCode =
-    typeof (error as { code?: unknown })?.code === "string"
-      ? ((error as { code: string }).code ?? "").toUpperCase()
-      : "";
-
-  if (explicitCode === "PLAN_REQUIRED" || explicitCode === "ENTITLEMENT_UNAVAILABLE") {
-    return {
-      errorCode: "PLAN_REQUIRED",
-      message: rawMessage || "This feature requires an active plan.",
-    };
-  }
 
   if (lower.includes("apple credentials")) {
     return {
@@ -113,7 +101,6 @@ export function mapToDashboardUserSafeError(
 export function statusForDashboardErrorCode(errorCode: DashboardErrorCode): number {
   if (errorCode === "INVALID_REQUEST") return 400;
   if (errorCode === "PAYLOAD_TOO_LARGE") return 413;
-  if (errorCode === "PLAN_REQUIRED") return 402;
   if (errorCode === "AUTH_REQUIRED") return 401;
   if (errorCode === "AUTHORIZATION_FAILED") return 403;
   if (errorCode === "NOT_FOUND") return 404;
@@ -171,9 +158,6 @@ export function toDashboardActionableErrorMessage(
   }
   if (errorCode === "TTY_REQUIRED") {
     return "Reauthentication requires an interactive terminal. Start dashboard from terminal and retry.";
-  }
-  if (errorCode === "PLAN_REQUIRED") {
-    return message || "This feature requires an active plan.";
   }
   if (isPrimaryAppIdAccessError) {
     return message || "Primary App ID is not accessible for this Apple Ads account.";

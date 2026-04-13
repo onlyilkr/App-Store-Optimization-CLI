@@ -7,6 +7,7 @@ Use `aso_evaluate_keywords` to evaluate explicit ASO keyword candidates (US stor
 - `keywords`: array of ASO search term candidates (single-word or long-tail phrases).
 - `minPopularity` (optional): minimum popularity threshold.
 - `maxDifficulty` (optional): maximum difficulty threshold.
+- `appId` (optional): local app id for association (defaults to research app when omitted).
 
 ## Behavior
 
@@ -19,8 +20,9 @@ Use `aso_evaluate_keywords` to evaluate explicit ASO keyword candidates (US stor
 - Output is a JSON array containing only accepted keywords with compact fields:
   - `keyword`
   - `popularity`
-  - `difficulty` (nullable when difficulty is masked/paywalled)
-- If difficulty entitlement is unavailable, difficulty-based filtering (`maxDifficulty`) is ignored for that run.
+  - `difficulty`
+  - `minDifficultyScore`
+  - `isBrandKeyword`
 
 ## Auth Requirement
 

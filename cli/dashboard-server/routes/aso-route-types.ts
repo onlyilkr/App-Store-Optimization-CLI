@@ -5,6 +5,7 @@ export type AsoApiAppDoc = {
   country: string;
   name: string;
   subtitle?: string;
+  publisherName?: string;
   averageUserRating: number;
   userRatingCount: number;
   releaseDate?: string | null;

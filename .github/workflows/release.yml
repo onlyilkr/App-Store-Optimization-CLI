@@ -10,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BUGSNAG_API_KEY: ${{ secrets.BUGSNAG_API_KEY }}
-      ASO_BACKEND_BASE_URL: ${{ vars['ASO_BACKEND_BASE_URL'] }}
     permissions:
       contents: read
       id-token: write

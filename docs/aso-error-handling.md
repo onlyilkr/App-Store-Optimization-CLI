@@ -12,7 +12,6 @@ Define failure boundaries, retry rules, and recovery behavior across CLI, dashbo
 ## Dashboard Error Codes
 - `INVALID_REQUEST`
 - `PAYLOAD_TOO_LARGE`
-- `PLAN_REQUIRED`
 - `AUTH_REQUIRED`
 - `AUTH_IN_PROGRESS`
 - `TTY_REQUIRED`
@@ -40,7 +39,6 @@ Define failure boundaries, retry rules, and recovery behavior across CLI, dashbo
 - If dashboard background stage-2 enrichment throws before returning per-keyword results, pending keywords are marked as `enrichment` failures in `aso_keyword_failures` so UI does not stay indefinitely in `Calculating...` and retry-failed remains available.
 - Dashboard retry-failed endpoint retries only failed keywords for selected app/country and returns `{ retriedCount, succeededCount, failedCount }`.
 - Top-app and competitor app-doc hydration (`/api/aso/top-apps`, `/api/aso/apps`):
-  - `/api/aso/top-apps` returns `PLAN_REQUIRED` when `top_apps` entitlement is unavailable.
   - Missing/expired competitor docs trigger backend fetch.
   - On hydration failure, return available cached competitor data when possible.
 - Owned app list hydration (`/api/apps`):
@@ -51,8 +49,7 @@ Define failure boundaries, retry rules, and recovery behavior across CLI, dashbo
   - If search-order lookup fails, numeric app-id input can still hydrate via direct lookup.
   - If final hydration fails, return `NETWORK_ERROR`.
 - CLI keyword fetch:
-  - Returns `{ items, failedKeywords }` for partial success.
-  - `difficultyScore` may be `null` (masked/paywalled) without turning the run into a hard error.
+  - Returns `{ items, failedKeywords, filteredOut }` for partial success.
   - Hard-fails only when all requested keywords fail.
 - `aso reset-credentials` clears local auth state explicitly.
 - `aso auth`:

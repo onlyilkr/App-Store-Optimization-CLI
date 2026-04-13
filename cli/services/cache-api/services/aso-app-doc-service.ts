@@ -98,6 +98,13 @@ function parseAppDocFromPayload(
     typeof product.subtitle === "string" && product.subtitle.trim() !== ""
       ? product.subtitle
       : undefined;
+  const publisherName = [
+    product.artistName,
+    product.sellerName,
+    product.developerName,
+  ].find((value) => typeof value === "string" && value.trim() !== "") as
+    | string
+    | undefined;
 
   if (!releaseDate || !currentVersionReleaseDate) {
     logger.debug("[aso-app-lookup] missing app date fields", {
@@ -118,6 +125,7 @@ function parseAppDocFromPayload(
     country,
     name: typeof product.name === "string" ? product.name : "",
     subtitle,
+    ...(publisherName ? { publisherName } : {}),
     averageUserRating: readNumber(userRating?.value),
     userRatingCount: readNumber(userRating?.ratingCount),
     releaseDate,

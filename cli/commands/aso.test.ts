@@ -38,21 +38,6 @@ jest.mock("../services/keywords/aso-research-keyword-service", () => ({
   saveKeywordsToResearchApp: jest.fn(),
 }));
 
-jest.mock("../services/backend/aso-backend-api-key-service", () => ({
-  asoBackendApiKeyService: {
-    setApiKey: jest.fn(),
-    clearApiKey: jest.fn(),
-    getStatus: jest.fn(() => ({ source: "none", maskedKey: null })),
-  },
-}));
-
-jest.mock("../services/backend/aso-backend-client", () => ({
-  asoBackendClient: {
-    isDifficultyEntitled: jest.fn(async () => true),
-    invalidateContextCache: jest.fn(),
-  },
-}));
-
 jest.mock("../utils/logger", () => ({
   logger: {
     debug: jest.fn(),
@@ -68,9 +53,6 @@ import { asoCookieStoreService } from "../services/auth/aso-cookie-store-service
 import { resolveAsoAdamId } from "../services/keywords/aso-adam-id-service";
 import { asoAuthService } from "../services/auth/aso-auth-service";
 import { saveKeywordsToResearchApp } from "../services/keywords/aso-research-keyword-service";
-import { asoBackendClient } from "../services/backend/aso-backend-client";
-import { asoBackendApiKeyService } from "../services/backend/aso-backend-api-key-service";
-import yargs from "yargs/yargs";
 
 const STDOUT_INTERACTIVE_AUTH_REQUIRED_MESSAGE =
   "This run needs interactive Apple Search Ads reauthentication. Run 'aso auth' in a terminal, then retry this command with --stdout.";
@@ -90,7 +72,6 @@ describe("aso command", () => {
     jest.mocked(resolveAsoAdamId).mockResolvedValue("1234567890");
     jest.mocked(saveKeywordsToResearchApp).mockReturnValue(0);
     jest.mocked(asoAuthService.reAuthenticate).mockResolvedValue("cookie=value");
-    jest.mocked(asoBackendClient.isDifficultyEntitled).mockResolvedValue(true);
   });
 
   it("starts dashboard when no keywords are provided", async () => {
@@ -247,28 +228,6 @@ describe("aso command", () => {
     expect(keywordPipelineService.run).not.toHaveBeenCalled();
   });
 
-  it("sets API key and invalidates context cache", async () => {
-    await asoCommand.handler?.({
-      subcommand: "api-key",
-      terms: "set",
-      subcommandValue: "key-123",
-    } as any);
-
-    expect(asoBackendApiKeyService.setApiKey).toHaveBeenCalledWith("key-123");
-    expect(asoBackendClient.invalidateContextCache).toHaveBeenCalledTimes(1);
-  });
-
-  it("parses `aso api-key set <key>` via yargs positional routing", async () => {
-    await yargs(["api-key", "set", "key-abc"])
-      .command(asoCommand)
-      .strict()
-      .exitProcess(false)
-      .parseAsync();
-
-    expect(asoBackendApiKeyService.setApiKey).toHaveBeenCalledWith("key-abc");
-    expect(asoBackendClient.invalidateContextCache).toHaveBeenCalledTimes(1);
-  });
-
   it("fails fast when --stdout is used without keyword terms in keywords mode", async () => {
     await expect(
       asoCommand.handler?.({
@@ -350,53 +309,6 @@ describe("aso command", () => {
     expect(mockLogger.debug).not.toHaveBeenCalled();
     expect(consoleLogSpy).toHaveBeenCalledWith(JSON.stringify(result, null, 2));
     expect(asoAuthService.reAuthenticate).not.toHaveBeenCalled();
-  });
-
-  it("strips internal item fields from --stdout payload", async () => {
-    jest.mocked(keywordPipelineService.parseKeywords).mockReturnValue(["term"]);
-    jest.mocked(keywordPipelineService.run).mockResolvedValue({
-      items: [
-        {
-          keyword: "term",
-          popularity: 42,
-          difficultyScore: 22,
-          difficultyState: "ready",
-          appCount: 99,
-          orderedAppIds: ["1", "2"],
-          orderExpiresAt: "2099-01-01T00:00:00.000Z",
-          popularityExpiresAt: "2099-02-01T00:00:00.000Z",
-          updatedAt: "2099-01-01T00:00:00.000Z",
-          appDocs: [{ appId: "1" }],
-        } as any,
-      ],
-      failedKeywords: [],
-      filteredOut: [],
-    } as any);
-
-    await asoCommand.handler?.({
-      subcommand: "keywords",
-      country: "US",
-      stdout: true,
-      terms: "term",
-    } as any);
-
-    expect(consoleLogSpy).toHaveBeenCalledWith(
-      JSON.stringify(
-        {
-          items: [
-            {
-              keyword: "term",
-              popularity: 42,
-              difficultyScore: 22,
-            },
-          ],
-          failedKeywords: [],
-          filteredOut: [],
-        },
-        null,
-        2
-      )
-    );
   });
 
   it("persists to provided app id", async () => {
@@ -517,49 +429,5 @@ describe("aso command", () => {
     ).rejects.toThrow(STDOUT_INTERACTIVE_AUTH_REQUIRED_MESSAGE);
 
     expect(keywordPipelineService.run).toHaveBeenCalledTimes(1);
-  });
-
-  it("disables max-difficulty filtering and masks difficulty when user is not entitled", async () => {
-    const result = {
-      items: [{ keyword: "term", popularity: 42, difficultyScore: 77 }],
-      failedKeywords: [],
-      filteredOut: [],
-    };
-    jest.mocked(asoBackendClient.isDifficultyEntitled).mockResolvedValue(false);
-    jest.mocked(keywordPipelineService.parseKeywords).mockReturnValue(["term"]);
-    jest.mocked(keywordPipelineService.run).mockResolvedValue(result as any);
-
-    await asoCommand.handler?.({
-      subcommand: "keywords",
-      country: "US",
-      stdout: true,
-      terms: "term",
-      "max-difficulty": 10,
-    } as any);
-
-    expect(keywordPipelineService.run).toHaveBeenCalledWith("US", ["term"], {
-      allowInteractiveAuthRecovery: false,
-      filters: {
-        minPopularity: undefined,
-        maxDifficulty: undefined,
-      },
-    });
-    expect(consoleLogSpy).toHaveBeenCalledWith(
-      JSON.stringify(
-        {
-          items: [
-            {
-              keyword: "term",
-              popularity: 42,
-              difficultyScore: null,
-            },
-          ],
-          failedKeywords: [],
-          filteredOut: [],
-        },
-        null,
-        2
-      )
-    );
   });
 });

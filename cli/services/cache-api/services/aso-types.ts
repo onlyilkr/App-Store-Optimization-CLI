@@ -1,4 +1,4 @@
-import type { AsoDifficultyState } from "../../../shared/aso-difficulty-state";
+import type { KeywordMatchType } from "../../../shared/aso-keyword-match";
 
 export interface AsoAppDocIcon {
   template?: string;
@@ -25,6 +25,7 @@ export interface AsoAppDoc {
   country: string;
   name: string;
   subtitle?: string;
+  publisherName?: string;
   averageUserRating: number;
   userRatingCount: number;
   releaseDate?: string | null;
@@ -40,9 +41,11 @@ export interface AsoKeywordRecord {
   normalizedKeyword: string;
   country: string;
   popularity: number;
-  difficultyScore: number | null;
-  difficultyState: AsoDifficultyState;
-  appCount: number | null;
+  difficultyScore: number;
+  minDifficultyScore: number;
+  isBrandKeyword: boolean | null;
+  appCount: number;
+  keywordMatch: KeywordMatchType;
   orderedAppIds: string[];
   createdAt: string;
   updatedAt: string;
@@ -61,9 +64,11 @@ export interface AsoCacheRepository {
     items: Array<{
       keyword: string;
       popularity: number;
-      difficultyScore: number | null;
-      difficultyState?: AsoDifficultyState;
-      appCount: number | null;
+      difficultyScore: number;
+      minDifficultyScore: number;
+      isBrandKeyword?: boolean | null;
+      appCount: number;
+      keywordMatch: KeywordMatchType;
       orderedAppIds: string[];
     }>;
     appDocs?: AsoAppDoc[];

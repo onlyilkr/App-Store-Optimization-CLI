@@ -61,7 +61,9 @@ describe("aso-cache-local", () => {
           keyword: "  Puzzle ",
           popularity: 55,
           difficultyScore: 20,
+          minDifficultyScore: 10,
           appCount: 100,
+          keywordMatch: "titleExactPhrase",
           orderedAppIds: ["1", "2"],
         },
       ],
@@ -93,7 +95,9 @@ describe("aso-cache-local", () => {
           keyword: "word",
           popularity: 10,
           difficultyScore: 11,
+          minDifficultyScore: 1,
           appCount: 2,
+          keywordMatch: "titleExactPhrase",
           orderedAppIds: ["1"],
         },
       ],
@@ -106,7 +110,9 @@ describe("aso-cache-local", () => {
           keyword: "word",
           popularity: 50,
           difficultyScore: 15,
+          minDifficultyScore: 2,
           appCount: 3,
+          keywordMatch: "titleAllWords",
           orderedAppIds: ["1", "2"],
         },
       ],
@@ -124,7 +130,9 @@ describe("aso-cache-local", () => {
         keyword: "stale",
         popularity: 33,
         difficultyScore: 12,
+        minDifficultyScore: 4,
         appCount: 10,
+        keywordMatch: "titleAllWords",
         orderedAppIds: ["1"],
         orderExpiresAt: "2000-01-01T00:00:00.000Z",
       },
@@ -145,7 +153,9 @@ describe("aso-cache-local", () => {
         keyword: "pending",
         popularity: 40,
         difficultyScore: null,
+        minDifficultyScore: null,
         appCount: null,
+        keywordMatch: null,
         orderedAppIds: [],
         orderExpiresAt: "2099-01-01T00:00:00.000Z",
       },
@@ -167,7 +177,9 @@ describe("aso-cache-local", () => {
         keyword: "competitive-fallback",
         popularity: 60,
         difficultyScore: 1,
+        minDifficultyScore: 1,
         appCount: 130,
+        keywordMatch: "none",
         orderedAppIds: ["1", "2", "3", "4", "5"],
         orderExpiresAt: "2099-01-01T00:00:00.000Z",
         popularityExpiresAt: "2099-01-01T00:00:00.000Z",
@@ -176,7 +188,9 @@ describe("aso-cache-local", () => {
         keyword: "low-competition",
         popularity: 20,
         difficultyScore: 1,
+        minDifficultyScore: 1,
         appCount: 3,
+        keywordMatch: "none",
         orderedAppIds: ["1", "2", "3"],
         orderExpiresAt: "2099-01-01T00:00:00.000Z",
         popularityExpiresAt: "2099-01-01T00:00:00.000Z",
@@ -185,7 +199,9 @@ describe("aso-cache-local", () => {
         keyword: "possible-real-one",
         popularity: 35,
         difficultyScore: 1,
+        minDifficultyScore: 1,
         appCount: 12,
+        keywordMatch: "none",
         orderedAppIds: ["1", "2", "3", "4", "5"],
         orderExpiresAt: "2099-01-01T00:00:00.000Z",
         popularityExpiresAt: "2099-01-01T00:00:00.000Z",
@@ -204,31 +220,6 @@ describe("aso-cache-local", () => {
       "low-competition",
       "possible-real-one",
     ]);
-    expect(result.misses).toEqual([]);
-  });
-
-  it("keeps complete rows cache-hittable even when difficulty state is failed", async () => {
-    upsertKeywords("US", [
-      {
-        keyword: "failed-fallback",
-        popularity: 40,
-        difficultyScore: 1,
-        difficultyState: "failed",
-        appCount: 130,
-        orderedAppIds: ["1", "2", "3", "4", "5"],
-        orderExpiresAt: "2099-01-01T00:00:00.000Z",
-        popularityExpiresAt: "2099-01-01T00:00:00.000Z",
-      },
-    ]);
-
-    const repository = new LocalAsoCacheRepository();
-    const result = await repository.getByKeywords({
-      country: "US",
-      keywords: ["failed-fallback"],
-    });
-
-    expect(result.hits).toHaveLength(1);
-    expect(result.hits[0]?.keyword).toBe("failed-fallback");
     expect(result.misses).toEqual([]);
   });
 
@@ -313,7 +304,9 @@ describe("aso-cache-local", () => {
           keyword: "stored",
           popularity: 44,
           difficultyScore: 22,
+          minDifficultyScore: 11,
           appCount: 9,
+          keywordMatch: "titleAllWords",
           orderedAppIds: ["100"],
         },
       ],

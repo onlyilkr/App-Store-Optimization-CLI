@@ -22,7 +22,7 @@ const server = new McpServer(
   },
   {
     instructions:
-      "Use `aso_evaluate_keywords` to evaluate explicit ASO keyword candidates. The tool returns only accepted keywords with compact scores.",
+      "Use `aso_evaluate_keywords` to evaluate explicit ASO keyword candidates. The tool returns only accepted keywords with compact scores and brand classification.",
   }
 );
 
@@ -31,7 +31,7 @@ server.registerTool(
   {
     title: "Evaluate ASO keywords",
     description:
-      "Evaluates explicit ASO search terms (single-word or multi-word long-tail phrases) and returns only accepted keywords with compact metrics: keyword, popularity, difficulty.",
+      "Evaluates explicit ASO search terms (single-word or multi-word long-tail phrases) and returns only accepted keywords with compact metrics: keyword, popularity, difficulty, minDifficultyScore, isBrandKeyword.",
     inputSchema: asoEvaluateKeywordsInputSchema,
   },
   handleAsoEvaluateKeywords

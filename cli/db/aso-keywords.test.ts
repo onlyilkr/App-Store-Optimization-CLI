@@ -48,7 +48,10 @@ describe("aso-keywords", () => {
         keyword: "Mixed",
         popularity: 10,
         difficultyScore: 2,
+        minDifficultyScore: 1,
+        isBrandKeyword: true,
         appCount: 4,
+        keywordMatch: "titleExactPhrase",
         orderedAppIds: ["a", "b"],
         orderExpiresAt: "2026-12-31T00:00:00.000Z",
       },
@@ -58,6 +61,7 @@ describe("aso-keywords", () => {
     expect(exact).not.toBeNull();
     expect(normalized?.normalizedKeyword).toBe("mixed");
     expect(normalized?.orderedAppIds).toEqual(["a", "b"]);
+    expect(normalized?.isBrandKeyword).toBe(true);
   });
 
   it("lists only the requested country", () => {
@@ -66,7 +70,10 @@ describe("aso-keywords", () => {
         keyword: "us-keyword",
         popularity: 1,
         difficultyScore: null,
+        minDifficultyScore: null,
+        isBrandKeyword: null,
         appCount: null,
+        keywordMatch: null,
         orderedAppIds: [],
         orderExpiresAt: "2026-12-31T00:00:00.000Z",
       },
@@ -76,7 +83,10 @@ describe("aso-keywords", () => {
         keyword: "gb-keyword",
         popularity: 2,
         difficultyScore: null,
+        minDifficultyScore: null,
+        isBrandKeyword: null,
         appCount: null,
+        keywordMatch: null,
         orderedAppIds: [],
         orderExpiresAt: "2026-12-31T00:00:00.000Z",
       },
@@ -90,13 +100,18 @@ describe("aso-keywords", () => {
         keyword: "rounded",
         popularity: 10,
         difficultyScore: 42.6,
+        minDifficultyScore: 18.2,
+        isBrandKeyword: false,
         appCount: 4,
+        keywordMatch: "titleExactPhrase",
         orderedAppIds: [],
         orderExpiresAt: "2026-12-31T00:00:00.000Z",
       },
     ]);
     const row = getKeyword("US", "rounded");
     expect(row?.difficultyScore).toBe(43);
+    expect(row?.minDifficultyScore).toBe(18);
+    expect(row?.isBrandKeyword).toBe(false);
   });
 
   it("preserves createdAt while updating existing keyword", () => {
@@ -105,7 +120,10 @@ describe("aso-keywords", () => {
         keyword: "keep-created",
         popularity: 1,
         difficultyScore: 1,
+        minDifficultyScore: 0,
+        isBrandKeyword: null,
         appCount: 1,
+        keywordMatch: "titleExactPhrase",
         orderedAppIds: [],
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
@@ -117,7 +135,10 @@ describe("aso-keywords", () => {
         keyword: "keep-created",
         popularity: 9,
         difficultyScore: 3,
+        minDifficultyScore: 1,
+        isBrandKeyword: false,
         appCount: 10,
+        keywordMatch: "titleAllWords",
         orderedAppIds: ["x"],
         orderExpiresAt: "2026-12-31T00:00:00.000Z",
       },
@@ -126,6 +147,7 @@ describe("aso-keywords", () => {
     expect(row?.createdAt).toBe("2026-01-01T00:00:00.000Z");
     expect(row?.popularity).toBe(9);
     expect(row?.orderedAppIds).toEqual(["x"]);
+    expect(row?.isBrandKeyword).toBe(false);
   });
 
   it("returns only expired keywords for the selected country", () => {
@@ -136,7 +158,10 @@ describe("aso-keywords", () => {
         keyword: "expired-us",
         popularity: 1,
         difficultyScore: null,
+        minDifficultyScore: null,
+        isBrandKeyword: null,
         appCount: null,
+        keywordMatch: null,
         orderedAppIds: [],
         orderExpiresAt: past,
       },
@@ -144,7 +169,10 @@ describe("aso-keywords", () => {
         keyword: "fresh-us",
         popularity: 1,
         difficultyScore: null,
+        minDifficultyScore: null,
+        isBrandKeyword: null,
         appCount: null,
+        keywordMatch: null,
         orderedAppIds: [],
         orderExpiresAt: future,
       },
@@ -154,7 +182,10 @@ describe("aso-keywords", () => {
         keyword: "expired-gb",
         popularity: 1,
         difficultyScore: null,
+        minDifficultyScore: null,
+        isBrandKeyword: null,
         appCount: null,
+        keywordMatch: null,
         orderedAppIds: [],
         orderExpiresAt: past,
       },

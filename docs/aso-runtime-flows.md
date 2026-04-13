@@ -9,8 +9,6 @@ Runtime flow contracts across CLI commands, local dashboard API, and ASO service
 
 ## Operational Prerequisite
 - Apple Search Ads setup is required only for ASO command flows (`aso ...`).
-- Difficulty/context backend defaults to `https://aso-difficulty-api.umitsemihcihan.workers.dev`.
-- `ASO_BACKEND_BASE_URL` is an optional override for non-production backends.
 - Required setup items:
   - Apple Search Ads account
   - Linked App Store Connect account in Apple Search Ads
@@ -18,12 +16,12 @@ Runtime flow contracts across CLI commands, local dashboard API, and ASO service
 
 ## Trigger Map
 - `aso`: resolve Primary App ID, start dashboard server (`3456` by default, auto-fallback to a free local port when occupied), start startup refresh manager.
-- `aso keywords "..."`: run full keyword pipeline and print envelope result (`items`, `failedKeywords`, `filteredOut`).
+- `aso keywords "..."`: run full keyword pipeline and print envelope result (`items`, `failedKeywords`, `filteredOut`); accepted/filtered rows include brand classification (`isBrandKeyword`) when available.
 - `aso keywords "..." --stdout`: machine-friendly mode; emits JSON-only stdout, attempts silent reauth, and fails when interactive user input is required.
 - `aso auth`: run only Apple Search Ads reauthentication.
 - `aso reset-credentials`: clear saved ASO keychain credentials and local cookies.
 - MCP `aso_evaluate_keywords`: accept explicit keywords (max 100), run `aso keywords "<comma-separated-keywords>" --stdout`, return evaluated keyword results.
-- Dashboard API mutations: app add (single-item POST; UI may batch multiple selections), app delete, keyword add/delete, auth start.
+- Dashboard API mutations: app add (single-item POST; UI may batch multiple selections), app delete, keyword add/delete, keyword favorite toggle, auth start.
 
 ## Boundary Ownership
 - Domain policy (`cli/domain/keywords/*`, `cli/domain/errors/*`) is shared across CLI/server/UI for country guardrails, keyword normalization, limits, and dashboard-safe error/message mapping.
@@ -49,7 +47,7 @@ Runtime flow contracts across CLI commands, local dashboard API, and ASO service
 5. Enrich required keywords (`/aso/enrich`) and persist enriched keywords + competitor app docs.
    - For top difficulty docs, enrichment fetches configured additional locales for the country and stores locale-keyed `name/subtitle` under competitor docs (`aso_apps.additionalLocalizations`) for per-localization keyword matching.
    - For `appCount>=5`, enrichment backfills missing top ids from cache/lookup and retries unresolved ids once; if still incomplete, keyword enrichment fails with `INSUFFICIENT_DOCS` instead of persisting fallback score `1`.
-   - Difficulty score itself is resolved via backend scoring (`POST /v1/aso/difficulty/score`) and may persist as `null` with internal `difficulty_state="paywalled"` when entitlement is missing.
+   - During enrichment, brand classification is computed as `isBrandKeyword` from top-doc publisher signals (`publisherName`) after hydration/backfill; this is a flag only and does not adjust difficulty scores.
 6. Refresh order-only keywords and persist updated `orderedAppIds` + `appCount` without refetching popularity.
    - Order refresh may include lightweight app metadata from search-page parsing, but Flow A persists only keyword order fields in this step; competitor doc cache (`aso_apps`) is hydrated later by Flow E endpoints when docs are missing/expired.
 7. Association write policy (`app_keywords`):
@@ -71,9 +69,6 @@ Runtime flow contracts across CLI commands, local dashboard API, and ASO service
 7. If user input is required, fail with guidance to run `aso auth` and retry.
 8. In raw CLI `--stdout` mode, keep the same association policy as Flow A (including `--no-associate`), and skip save logs so stdout stays JSON-only.
 9. Success output envelope is machine-parseable JSON: `items`, `failedKeywords`, `filteredOut` with exit code `0`.
-   - `items[]` exposes only `keyword`, `popularity`, `difficultyScore`.
-   - `items[].difficultyScore` may be `null` when masked/paywalled.
-   - `difficultyState` is not exposed in `--stdout` payloads.
 10. Failure output envelope is machine-parseable JSON on stdout:
     - `error.code` (`CLI_VALIDATION_ERROR` or `CLI_RUNTIME_ERROR`)
     - `error.message`
@@ -89,6 +84,8 @@ Runtime flow contracts across CLI commands, local dashboard API, and ASO service
 5. Return `201` immediately with `{ cachedCount, pendingCount, failedCount }`.
 6. Persist any popularity-stage failures in `aso_keyword_failures`.
 7. `GET /api/aso/keywords` (app-scoped) keeps app-associated failed keywords visible with `keywordStatus="failed"` even when no `aso_keywords` row exists yet (for example, popularity-stage failures).
+   - App-scoped keyword reads are always paginated and require `appId`, with server-side search/filter/sort (`keyword`, `minPopularity`, `maxDifficulty`, `brand`, `favorite`, `minRank`, `maxRank`, `sortBy`, `sortDir`, `page`, `pageSize`).
+   - Paginated response shape is `{ items, page, pageSize, totalCount, totalPages, hasPrevPage, hasNextPage, associatedCount, failedCount, pendingCount }`.
 8. Run background keyword work for misses:
    - full enrichment for `pendingItems`
      - enrichment is persisted per keyword as each worker finishes (progressive visibility on regular keyword polling).
@@ -101,6 +98,12 @@ Runtime flow contracts across CLI commands, local dashboard API, and ASO service
 3. Return `{ retriedCount, succeededCount, failedCount }`.
 4. Clear failed status for keywords that succeeded.
 5. Dashboard UI shows the retry action only when current keyword rows include failed entries.
+
+## Flow B3: Dashboard Keyword Favorites (`POST /api/aso/keywords/favorite`)
+1. UI toggles the row heart control in the dedicated `Favorite` column.
+2. Client sends `{ appId, country, keyword, isFavorite }`.
+3. Server updates `app_keywords.is_favorite` for the exact `(appId, keyword, country)` association.
+4. Favorite state is app-scoped: the same keyword associated to a different app keeps its own favorite state.
 
 ## Flow C: Dashboard Reauthentication
 1. Add-keyword flow returns `AUTH_REQUIRED` or `AUTH_IN_PROGRESS` when auth state blocks stage 1.
@@ -115,8 +118,7 @@ Runtime flow contracts across CLI commands, local dashboard API, and ASO service
 2. Select keywords associated with owned or research apps and finite popularity where at least one is true:
    - popularity TTL is stale
    - difficulty has never been computed
-   - order TTL is stale
-   - paywalled missing-difficulty rows are skipped while current difficulty entitlement is unavailable.
+   - order TTL is stale (owned-associated keywords only; research-only keywords do not use order staleness as a refresh trigger)
 3. Run the same keyword pipeline used by CLI fetch in non-interactive mode, in batches while pausing for foreground mutations.
 4. Publish refresh status via `GET /api/aso/refresh-status`.
 
@@ -125,8 +127,7 @@ Runtime flow contracts across CLI commands, local dashboard API, and ASO service
   - ensure default research app exists.
   - return `owned_apps` rows joined with `owned_app_country_ratings` for the hydration country (`kind`, rating snapshots, icons, fetch timestamps).
   - refresh stale `kind=owned` rows when `owned_app_country_ratings.last_fetched_at` exceeds `ASO_OWNED_APP_DOC_REFRESH_MAX_AGE_HOURS` (default `24`) using localized app-page `serialized-server-data` JSON.
-- `GET /api/aso/top-apps`: read ordered IDs from keyword, return competitor docs, hydrate missing/expired competitor docs.
-  - Requires `top_apps` entitlement; when unavailable returns `PLAN_REQUIRED`.
+- `GET /api/aso/top-apps`: read ordered IDs from keyword; when keyword order TTL is stale, refresh order first, then return competitor docs and hydrate missing/expired competitor docs.
 - `GET /api/aso/apps`: competitor-doc endpoint for requested IDs (`aso_apps` only), hydrate missing/expired competitor docs (or force with `refresh=true`).
 - `GET /api/aso/apps/search`: resolve ordered IDs for a free-text term and hydrate competitor docs for the top IDs.
 
@@ -147,16 +148,19 @@ Runtime flow contracts across CLI commands, local dashboard API, and ASO service
 ## Rank Delta Contract
 - `app_keywords.previous_position` stores prior rank per `(app, keyword, country)`.
 - Before keyword overwrite, previous positions are updated from existing `ordered_app_ids`.
+- `app_keyword_position_history` stores append-only rank snapshots per `(app, keyword, country, captured_at)` whenever fresh keyword order is persisted.
+- Position history retention is `90` days, pruned at most once per day via write-path metadata watermarking.
 - Consumers compute current rank from latest `orderedAppIds` and compare against `previous_position`.
+- Dashboard history reads use `GET /api/aso/keywords/history?appId=...&keyword=...&country=US` and return time-ordered points with non-null positions only.
 
 ## Guardrails
 - Country must be `US`.
 - Keyword limit is `100`.
 - Dashboard JSON request payloads are capped at `1 MiB`.
-- Dashboard keyword reads pre-index app-keyword associations by keyword to avoid repeated scans per row.
+- Dashboard paginated keyword reads use app-scoped SQL joins so keyword rows are filtered/sorted in storage before page slicing.
 - In dashboard research workspace, `Rank` and `Change` columns remain hidden; `Updated` stays visible.
 - Dashboard keyword sort is global (`localStorage`) across apps. On startup, restore the last valid sort; fallback to `Updated` descending (newest first) when missing/invalid or when the selected sort column is unavailable in the current workspace.
-- Dashboard numeric filters (`minPopularity`, `maxDifficulty`, `minRank`, `maxRank`) persist via `localStorage` across browser refresh and dashboard restarts; keyword text search always resets on startup.
+- Dashboard filters (`minPopularity`, `maxDifficulty`, `brand`, `favorite`, `minRank`, `maxRank`) persist via `localStorage` across browser refresh and dashboard restarts; keyword text search always resets on startup.
 - Dashboard keyword table shortcuts: `Cmd/Ctrl+A` selects all visible keywords, `Cmd/Ctrl+C` copies selected visible keywords as comma-separated text, `Cmd/Ctrl+V` pastes clipboard text into the add-keywords input when focus is outside editable fields, and `Delete`/`Backspace` opens the delete confirmation for selected visible keywords when focus is outside editable fields.
 - Sidebar app rows treat click targets consistently: clicking row text/icon content selects the app, while explicit app-ID copy controls keep copy behavior and do not trigger app switching.
 - Sidebar app rows support right-click app actions; delete is available for owned apps and non-default research apps only.
@@ -175,7 +179,6 @@ Runtime flow contracts across CLI commands, local dashboard API, and ASO service
 2. Treat each input as a search term candidate (single-word or long-tail phrase), then split comma-separated entries, normalize (`trim + lowercase`), and dedupe valid candidates.
 3. Return an MCP error when provided keyword count is greater than `100`.
 4. Execute `aso keywords "<comma-separated-keywords>" --stdout --min-popularity <resolvedMin> --max-difficulty <resolvedMax> [--app-id <appId>]`.
-   - When difficulty entitlement is unavailable, runtime ignores difficulty-based filtering (`maxDifficulty`) for this run.
 5. Parse CLI output envelope and return a compact JSON array derived from accepted `items`.
 6. MCP does not write directly; association writes are owned by the CLI command path from step 4.
 
@@ -183,7 +186,8 @@ Accepted row fields:
 - `keyword`: normalized keyword phrase.
 - `popularity`: Apple Search Ads popularity score (higher is better).
 - `difficulty`: keyword competition difficulty score (lower is better).
-  - Nullable when difficulty is masked/paywalled (`null`).
+- `minDifficultyScore`: lowest visibility score among the top 5 search results for the keyword.
+- `isBrandKeyword`: `true` when classified as brand keyword, otherwise `false`.
 
 ## Flow G: CLI Auth-Only (`aso auth`)
 1. Try reusing cached Apple session cookies first (non-interactive validation).

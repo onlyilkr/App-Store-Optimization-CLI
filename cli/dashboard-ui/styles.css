@@ -1029,6 +1029,19 @@ td.updated-value {
   color: color-mix(in oklab, var(--foreground) 82%, var(--primary));
 }
 
+.rank-history-trigger {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+
+.rank-history-trigger:hover {
+  text-decoration: underline;
+}
+
 .empty {
   margin: 14px;
   color: var(--muted-foreground);
@@ -1076,6 +1089,10 @@ tbody tr.selected:hover td {
 
 .top-apps-dialog-card {
   width: min(920px, 100%);
+}
+
+.position-history-dialog-card {
+  width: min(820px, 100%);
 }
 
 .dialog-header {
@@ -1309,6 +1326,53 @@ tbody tr.selected:hover td {
 .top-app-store-button svg {
   width: 1rem;
   height: 1rem;
+}
+
+.position-history-chart-wrap {
+  display: grid;
+  gap: 10px;
+}
+
+.position-history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 0.82rem;
+  color: var(--muted-foreground);
+}
+
+.position-history-chart {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid color-mix(in oklab, var(--border) 88%, transparent);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--card) 92%, transparent);
+}
+
+.position-history-axis {
+  stroke: color-mix(in oklab, var(--border) 90%, transparent);
+  stroke-width: 1;
+}
+
+.position-history-line {
+  fill: none;
+  stroke: color-mix(in oklab, var(--primary) 84%, white);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.position-history-point {
+  fill: color-mix(in oklab, var(--primary) 78%, white);
+}
+
+.position-history-axis-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
 }
 
 .hidden {
@@ -2085,6 +2149,52 @@ td.updated-value {
   color: #707070;
 }
 
+.favorite-column {
+  min-width: 88px;
+}
+
+.favorite-heart-button {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: #6f6f6f;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.favorite-heart-button:hover:not(:disabled),
+.favorite-heart-button:focus-visible {
+  border-color: rgba(112, 172, 231, 0.42);
+  background: rgba(112, 172, 231, 0.12);
+  color: #d1e8fa;
+}
+
+.favorite-heart-button.is-favorite {
+  color: #fb7185;
+}
+
+.favorite-heart-button.is-favorite:hover:not(:disabled),
+.favorite-heart-button.is-favorite:focus-visible {
+  border-color: rgba(251, 113, 133, 0.45);
+  background: rgba(251, 113, 133, 0.16);
+  color: #fecdd3;
+}
+
+.favorite-heart-button:disabled {
+  cursor: progress;
+  opacity: 0.65;
+}
+
+.favorite-heart-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
 .delta {
   border-radius: 999px;
   padding: 1px 7px;
@@ -2488,4 +2598,17 @@ td.updated-value {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+.keyword-pagination {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.keyword-pagination-label {
+  min-width: 88px;
+  text-align: center;
+  font-size: 11px;
+  color: color-mix(in oklab, var(--muted-foreground) 86%, var(--foreground));
 }

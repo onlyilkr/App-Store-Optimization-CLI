@@ -51,6 +51,195 @@ function withAppKinds(apps: AppRow[]): Array<AppRow & { kind: AppKind }> {
   });
 }
 
+function getKeywordStatus(item: {
+  keywordStatus?: string;
+  difficultyScore?: number | null;
+}): "ok" | "pending" | "failed" {
+  if (item.keywordStatus === "failed") return "failed";
+  if (item.keywordStatus === "pending") return "pending";
+  if (item.keywordStatus === "ok") return "ok";
+  return item.difficultyScore == null ? "pending" : "ok";
+}
+
+function getCurrentPosition(item: { positions?: unknown[] }, appId: string): number | null {
+  const position = (item.positions ?? [])
+    .map((value) => value as { appId?: string; currentPosition?: number | null })
+    .find((value) => value.appId === appId);
+  return position?.currentPosition ?? null;
+}
+
+function getPreviousPosition(item: { positions?: unknown[] }, appId: string): number | null {
+  const position = (item.positions ?? [])
+    .map((value) => value as { appId?: string; previousPosition?: number | null })
+    .find((value) => value.appId === appId);
+  return position?.previousPosition ?? null;
+}
+
+function parseQueryInt(
+  value: string | null,
+  fallback: number,
+  min: number,
+  max: number
+): number {
+  if (value == null || value.trim() === "") return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (parsed < min) return min;
+  if (parsed > max) return max;
+  return parsed;
+}
+
+function buildKeywordPagedPayloadForQuery(
+  allItems: unknown[],
+  appId: string,
+  query: URLSearchParams
+) {
+  const scopedItems = allItems.map((item) => item as Record<string, unknown>);
+  const page = parseQueryInt(query.get("page"), 1, 1, Number.MAX_SAFE_INTEGER);
+  const pageSize = parseQueryInt(query.get("pageSize"), 100, 1, 500);
+  const minPopularity = parseQueryInt(query.get("minPopularity"), 0, 0, 100);
+  const maxDifficulty = parseQueryInt(query.get("maxDifficulty"), 100, 0, 100);
+  const minRank = parseQueryInt(query.get("minRank"), 0, 0, 201);
+  const maxRank = parseQueryInt(query.get("maxRank"), 201, 0, 201);
+  const normalizedMinRank = Math.min(minRank, maxRank);
+  const normalizedMaxRank = Math.max(minRank, maxRank);
+  const keywordTerm = (query.get("keyword") ?? "").trim().toLowerCase();
+  const brandFilter = query.get("brand") ?? "all";
+  const favoriteFilter = query.get("favorite") ?? "all";
+  const sortBy = query.get("sortBy") ?? "updatedAt";
+  const sortDir = query.get("sortDir") === "asc" ? "asc" : "desc";
+
+  const filtered = scopedItems.filter((item) => {
+    const keyword = String(item.keyword ?? "");
+    if (keywordTerm !== "" && !keyword.toLowerCase().includes(keywordTerm)) return false;
+    const popularity =
+      typeof item.popularity === "number" && Number.isFinite(item.popularity)
+        ? item.popularity
+        : 0;
+    if (minPopularity > 0 && popularity <= minPopularity) return false;
+
+    const difficultyScore =
+      typeof item.difficultyScore === "number" && Number.isFinite(item.difficultyScore)
+        ? item.difficultyScore
+        : null;
+    if (maxDifficulty < 100 && difficultyScore != null && difficultyScore >= maxDifficulty) {
+      return false;
+    }
+
+    if (brandFilter === "brand" && item.isBrandKeyword !== true) return false;
+    if (brandFilter === "non_brand" && item.isBrandKeyword !== false) return false;
+    if (favoriteFilter === "favorite" && item.isFavorite !== true) return false;
+    if (favoriteFilter === "non_favorite" && item.isFavorite === true) return false;
+
+    const hasRankFilter = normalizedMinRank > 0 || normalizedMaxRank < 201;
+    if (hasRankFilter) {
+      const currentPosition = getCurrentPosition(item, appId);
+      if (currentPosition == null) return false;
+      if (normalizedMinRank > 0 && currentPosition <= normalizedMinRank) return false;
+      if (normalizedMaxRank < 201 && currentPosition >= normalizedMaxRank) return false;
+    }
+
+    return true;
+  });
+
+  filtered.sort((left, right) => {
+    const direction = sortDir === "desc" ? -1 : 1;
+    const compareNullable = (a: number | null, b: number | null) => {
+      if (a == null && b == null) return 0;
+      if (a == null) return 1;
+      if (b == null) return -1;
+      if (a === b) return 0;
+      return a > b ? direction : -direction;
+    };
+    const compareKeywordAsc = () =>
+      String(left.keyword ?? "").localeCompare(String(right.keyword ?? ""), undefined, {
+        sensitivity: "base",
+      });
+
+    let comparison = 0;
+    switch (sortBy) {
+      case "keyword": {
+        const cmp = String(left.keyword ?? "").localeCompare(String(right.keyword ?? ""), undefined, {
+          sensitivity: "base",
+        });
+        comparison = sortDir === "desc" ? -cmp : cmp;
+        break;
+      }
+      case "popularity":
+        comparison = compareNullable(
+          typeof left.popularity === "number" ? left.popularity : null,
+          typeof right.popularity === "number" ? right.popularity : null
+        );
+        break;
+      case "difficulty":
+        comparison = compareNullable(
+          typeof left.difficultyScore === "number" ? left.difficultyScore : null,
+          typeof right.difficultyScore === "number" ? right.difficultyScore : null
+        );
+        break;
+      case "appCount":
+        comparison = compareNullable(
+          typeof left.appCount === "number" ? left.appCount : null,
+          typeof right.appCount === "number" ? right.appCount : null
+        );
+        break;
+      case "rank":
+        comparison = compareNullable(
+          getCurrentPosition(left, appId),
+          getCurrentPosition(right, appId)
+        );
+        break;
+      case "change": {
+        const leftCurrent = getCurrentPosition(left, appId);
+        const rightCurrent = getCurrentPosition(right, appId);
+        const leftPrevious = getPreviousPosition(left, appId);
+        const rightPrevious = getPreviousPosition(right, appId);
+        const leftChange =
+          leftCurrent == null ? null : leftCurrent - (leftPrevious ?? leftCurrent);
+        const rightChange =
+          rightCurrent == null ? null : rightCurrent - (rightPrevious ?? rightCurrent);
+        comparison = compareNullable(leftChange, rightChange);
+        break;
+      }
+      case "updatedAt":
+      default:
+        comparison = compareNullable(
+          typeof left.updatedAt === "string"
+            ? new Date(left.updatedAt).getTime()
+            : null,
+          typeof right.updatedAt === "string"
+            ? new Date(right.updatedAt).getTime()
+            : null
+        );
+        break;
+    }
+    if (comparison !== 0) return comparison;
+    return compareKeywordAsc();
+  });
+
+  const associatedCount = scopedItems.length;
+  const failedCount = scopedItems.filter((item) => getKeywordStatus(item) === "failed").length;
+  const pendingCount = scopedItems.filter((item) => getKeywordStatus(item) === "pending").length;
+  const totalCount = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const normalizedPage = Math.min(page, totalPages);
+  const offset = (normalizedPage - 1) * pageSize;
+  const items = filtered.slice(offset, offset + pageSize);
+
+  return {
+    items,
+    page: normalizedPage,
+    pageSize,
+    totalCount,
+    totalPages,
+    hasPrevPage: normalizedPage > 1,
+    hasNextPage: normalizedPage < totalPages,
+    associatedCount,
+    failedCount,
+    pendingCount,
+  };
+}
+
 function buildFetchMock(params: {
   apps: AppRow[];
   afterAddApps?: AppRow[];
@@ -58,6 +247,7 @@ function buildFetchMock(params: {
   appDocsById?: Record<string, unknown>;
   topAppsByKeyword?: Record<string, { status: number; body: unknown }>;
   onAddKeywords?: (payload: any) => void;
+  onSetFavorite?: (payload: any) => void;
 }) {
   let appsCallCount = 0;
   return jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -92,7 +282,11 @@ function buildFetchMock(params: {
       const appId = query.get("appId") ?? "";
       return jsonResponse(200, {
         success: true,
-        data: params.keywordsByAppId[appId] ?? [],
+        data: buildKeywordPagedPayloadForQuery(
+          params.keywordsByAppId[appId] ?? [],
+          appId,
+          query
+        ),
       });
     }
 
@@ -120,6 +314,29 @@ function buildFetchMock(params: {
       return jsonResponse(201, {
         success: true,
         data: { cachedCount: 0, pendingCount: 0, failedCount: 0 },
+      });
+    }
+
+    if (method === "POST" && url === "/api/aso/keywords/favorite") {
+      params.onSetFavorite?.(body);
+      const appId = String(body?.appId ?? "");
+      const keyword = String(body?.keyword ?? "").trim().toLowerCase();
+      const nextIsFavorite = body?.isFavorite === true;
+      const scoped = params.keywordsByAppId[appId] ?? [];
+      for (const item of scoped) {
+        const row = item as Record<string, unknown>;
+        const rowKeyword = String(row.keyword ?? "").trim().toLowerCase();
+        if (rowKeyword === keyword) {
+          row.isFavorite = nextIsFavorite;
+        }
+      }
+      return jsonResponse(200, {
+        success: true,
+        data: {
+          appId,
+          keyword,
+          isFavorite: nextIsFavorite,
+        },
       });
     }
 
@@ -463,6 +680,168 @@ describe("dashboard app behaviors", () => {
     });
   });
 
+  it("applies, persists, and resets brand filter", async () => {
+    localStorage.setItem("aso-dashboard:selected-app-id", "111");
+    const fetchMock = buildFetchMock({
+      apps: [
+        { id: DEFAULT_RESEARCH_APP_ID, name: "Research" },
+        { id: "111", name: "Owned App" },
+      ],
+      keywordsByAppId: {
+        "111": [
+          {
+            keyword: "brand-term",
+            popularity: 70,
+            difficultyScore: 30,
+            isBrandKeyword: true,
+            appCount: 80,
+            positions: [{ appId: "111", previousPosition: 12, currentPosition: 10 }],
+            updatedAt: "2026-03-12T08:00:00.000Z",
+          },
+          {
+            keyword: "non-brand-term",
+            popularity: 75,
+            difficultyScore: 32,
+            isBrandKeyword: false,
+            appCount: 85,
+            positions: [{ appId: "111", previousPosition: 20, currentPosition: 14 }],
+            updatedAt: "2026-03-12T08:05:00.000Z",
+          },
+          {
+            keyword: "unknown-term",
+            popularity: 60,
+            difficultyScore: null,
+            isBrandKeyword: null,
+            appCount: null,
+            positions: [{ appId: "111", previousPosition: null, currentPosition: null }],
+            updatedAt: "2026-03-12T08:10:00.000Z",
+          },
+        ],
+      },
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const { unmount } = render(<App />);
+    await screen.findByText("brand-term");
+    await screen.findByText("non-brand-term");
+    await screen.findByText("unknown-term");
+
+    fireEvent.click(screen.getByLabelText("Brand filter"));
+    const menu = await screen.findByText("Brand", {
+      selector: ".filter-menu-label",
+    });
+    fireEvent.click(
+      within(menu.closest(".filter-menu-content") as HTMLElement).getByRole("button", {
+        name: "Brand",
+      })
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("brand-term")).toBeInTheDocument();
+      expect(screen.queryByText("non-brand-term")).not.toBeInTheDocument();
+      expect(screen.queryByText("unknown-term")).not.toBeInTheDocument();
+    });
+
+    unmount();
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText("brand-term")).toBeInTheDocument();
+      expect(screen.queryByText("non-brand-term")).not.toBeInTheDocument();
+      expect(screen.queryByText("unknown-term")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+    await waitFor(() => {
+      expect(screen.getByText("brand-term")).toBeInTheDocument();
+      expect(screen.getByText("non-brand-term")).toBeInTheDocument();
+      expect(screen.getByText("unknown-term")).toBeInTheDocument();
+    });
+  });
+
+  it("toggles keyword favorites and filters by favorite status", async () => {
+    localStorage.setItem("aso-dashboard:selected-app-id", "111");
+    let favoritePayload: any = null;
+    const fetchMock = buildFetchMock({
+      apps: [
+        { id: DEFAULT_RESEARCH_APP_ID, name: "Research" },
+        { id: "111", name: "Owned App" },
+      ],
+      keywordsByAppId: {
+        "111": [
+          {
+            keyword: "fav-one",
+            popularity: 65,
+            difficultyScore: 25,
+            isFavorite: false,
+            appCount: 80,
+            positions: [{ appId: "111", previousPosition: 10, currentPosition: 8 }],
+            updatedAt: "2026-03-12T08:00:00.000Z",
+          },
+          {
+            keyword: "fav-two",
+            popularity: 72,
+            difficultyScore: 31,
+            isFavorite: true,
+            appCount: 84,
+            positions: [{ appId: "111", previousPosition: 12, currentPosition: 9 }],
+            updatedAt: "2026-03-12T08:05:00.000Z",
+          },
+          {
+            keyword: "not-fav",
+            popularity: 75,
+            difficultyScore: 33,
+            isFavorite: false,
+            appCount: 90,
+            positions: [{ appId: "111", previousPosition: 16, currentPosition: 14 }],
+            updatedAt: "2026-03-12T08:10:00.000Z",
+          },
+        ],
+      },
+      onSetFavorite: (payload) => {
+        favoritePayload = payload;
+      },
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    render(<App />);
+
+    await screen.findByText("fav-one");
+    await screen.findByText("fav-two");
+    await screen.findByText("not-fav");
+
+    fireEvent.click(screen.getByRole("button", { name: "Favorite keyword fav-one" }));
+    await waitFor(() =>
+      expect(favoritePayload).toEqual({
+        appId: "111",
+        keyword: "fav-one",
+        isFavorite: true,
+        country: "US",
+      })
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Unfavorite keyword fav-one" })
+      ).toBeInTheDocument()
+    );
+
+    fireEvent.click(screen.getByLabelText("Favorite filter"));
+    const menu = await screen.findByText("Favorite", {
+      selector: ".filter-menu-label",
+    });
+    fireEvent.click(
+      within(menu.closest(".filter-menu-content") as HTMLElement).getByRole("button", {
+        name: "Favorite",
+      })
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("fav-one")).toBeInTheDocument();
+      expect(screen.getByText("fav-two")).toBeInTheDocument();
+      expect(screen.queryByText("not-fav")).not.toBeInTheDocument();
+    });
+  });
+
   it("keeps numeric filters after remount but clears keyword text search", async () => {
     localStorage.setItem("aso-dashboard:selected-app-id", "111");
     const fetchMock = buildFetchMock({
@@ -584,50 +963,6 @@ describe("dashboard app behaviors", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "Top Apps" })[1]);
     expect(await screen.findByText("Failed to load top apps")).toBeInTheDocument();
-  });
-
-  it("shows actionable top-apps paywall message", async () => {
-    localStorage.setItem("aso-dashboard:selected-app-id", "111");
-    const fetchMock = buildFetchMock({
-      apps: [
-        { id: DEFAULT_RESEARCH_APP_ID, name: "Research" },
-        { id: "111", name: "Owned App" },
-      ],
-      keywordsByAppId: {
-        "111": [
-          {
-            keyword: "locked-top-apps",
-            popularity: 44,
-            difficultyScore: 20,
-            appCount: 60,
-            positions: [{ appId: "111", previousPosition: 9, currentPosition: 7 }],
-            updatedAt: "2026-03-12T08:00:00.000Z",
-          },
-        ],
-      },
-      topAppsByKeyword: {
-        "locked-top-apps": {
-          status: 402,
-          body: {
-            success: false,
-            errorCode: "PLAN_REQUIRED",
-            error:
-              "Top apps requires an active plan. Upgrade: https://paywall.example/upgrade",
-          },
-        },
-      },
-    });
-    global.fetch = fetchMock as typeof fetch;
-
-    render(<App />);
-
-    await screen.findByText("locked-top-apps");
-    fireEvent.click(screen.getByRole("button", { name: "Top Apps" }));
-    expect(
-      await screen.findByText(
-        "Top apps requires an active plan. Upgrade: https://paywall.example/upgrade"
-      )
-    ).toBeInTheDocument();
   });
 
   it("selects owned app when clicking sidebar text content", async () => {

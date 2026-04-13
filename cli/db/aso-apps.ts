@@ -5,6 +5,7 @@ type AppDocInput = {
   appId: string;
   name: string;
   subtitle?: string;
+  publisherName?: string;
   averageUserRating: number;
   userRatingCount: number;
   releaseDate?: string | null;
@@ -19,6 +20,7 @@ type AsoAppRow = {
   app_id: string;
   name: string;
   subtitle: string | null;
+  publisher_name: string | null;
   average_user_rating: number;
   user_rating_count: number;
   release_date: string | null;
@@ -90,6 +92,7 @@ function toStoredApp(row: AsoAppRow): StoredAsoApp {
     appId: row.app_id,
     name: row.name,
     subtitle: row.subtitle ?? undefined,
+    publisherName: row.publisher_name ?? undefined,
     averageUserRating: row.average_user_rating,
     userRatingCount: row.user_rating_count,
     releaseDate: row.release_date,
@@ -112,6 +115,7 @@ export function getCompetitorAppDocs(
   const rows = db
     .prepare(
       `SELECT app_id, name, subtitle, average_user_rating, user_rating_count,
+              publisher_name,
               release_date, current_version_release_date,
               icon_json, icon_artwork_json, additional_localizations_json,
               expires_at, country
@@ -165,18 +169,19 @@ export function upsertCompetitorAppDocs(
 
   const upsertStmt = db.prepare(`
     INSERT INTO aso_apps (
-      country, app_id, name, subtitle, average_user_rating,
+      country, app_id, name, subtitle, publisher_name, average_user_rating,
       user_rating_count, release_date, current_version_release_date,
       icon_json, icon_artwork_json, additional_localizations_json, expires_at
     )
     VALUES (
-      @country, @appId, @name, @subtitle, @averageUserRating,
+      @country, @appId, @name, @subtitle, @publisherName, @averageUserRating,
       @userRatingCount, @releaseDate, @currentVersionReleaseDate,
       @iconJson, @iconArtworkJson, @additionalLocalizationsJson, @expiresAt
     )
     ON CONFLICT(country, app_id) DO UPDATE SET
       name = excluded.name,
       subtitle = excluded.subtitle,
+      publisher_name = excluded.publisher_name,
       average_user_rating = excluded.average_user_rating,
       user_rating_count = excluded.user_rating_count,
       release_date = excluded.release_date,
@@ -200,6 +205,7 @@ export function upsertCompetitorAppDocs(
         appId: doc.appId,
         name: doc.name,
         subtitle: doc.subtitle ?? null,
+        publisherName: doc.publisherName ?? null,
         averageUserRating: doc.averageUserRating,
         userRatingCount: doc.userRatingCount,
         releaseDate: doc.releaseDate ?? null,

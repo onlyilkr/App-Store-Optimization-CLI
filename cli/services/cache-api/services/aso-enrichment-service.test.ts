@@ -45,14 +45,24 @@ function buildSearchHtml(): string {
   return buildSearchHtmlForIds(["1", "2", "3", "4", "5"]);
 }
 
-function buildSearchHtmlForIds(ids: string[], tailIds: string[] = []): string {
+function buildSearchHtmlForIds(
+  ids: string[],
+  tailIds: string[] = [],
+  options?: {
+    developerNamesById?: Record<string, string>;
+    ratingCountById?: Record<string, string | number>;
+  }
+): string {
   const items = ids.map((id, index) => ({
     lockup: {
       adamId: id,
       title: `App ${id}`,
       subtitle: `Sub ${id}`,
       rating: Math.max(1, 4.9 - index * 0.1),
-      ratingCount: `${(index + 1) * 1000}`,
+      ratingCount: String(options?.ratingCountById?.[id] ?? `${(index + 1) * 1000}`),
+      ...(options?.developerNamesById?.[id]
+        ? { developerName: options.developerNamesById[id] }
+        : {}),
     },
   }));
   return `<html><body><script id="serialized-server-data">${JSON.stringify({
@@ -72,6 +82,27 @@ function buildSearchHtmlForIds(ids: string[], tailIds: string[] = []): string {
       },
     ],
   })}</script></body></html>`;
+}
+
+function buildCompleteCachedTopDocs(
+  ids: string[],
+  options?: {
+    publisherNamesById?: Record<string, string>;
+  }
+) {
+  return ids.map((appId, index) => ({
+    appId,
+    country: "US",
+    name: `Cached ${appId}`,
+    averageUserRating: 4.8 - index * 0.1,
+    userRatingCount: (index + 1) * 1000,
+    releaseDate: "2024-01-01T00:00:00.000Z",
+    currentVersionReleaseDate: "2025-01-01T00:00:00.000Z",
+    expiresAt: "2099-01-01T00:00:00.000Z",
+    ...(options?.publisherNamesById?.[appId]
+      ? { publisherName: options.publisherNamesById[appId] }
+      : {}),
+  }));
 }
 
 describe("aso-enrichment-service", () => {
@@ -378,6 +409,8 @@ describe("aso-enrichment-service", () => {
         ],
       }
     );
+
+    expect(result.keywordMatch).toBe("titleExactPhrase");
   });
 
   it("does not set expiresAt for non-top apps without app-specific lookup", async () => {
@@ -565,4 +598,242 @@ describe("aso-enrichment-service", () => {
     });
   });
 
+  it("fails with INSUFFICIENT_DOCS when top docs exist but release dates remain missing", async () => {
+    mockedAsoAppleGet.mockResolvedValue({
+      data: buildSearchHtmlForIds(["1", "2", "3"], ["4", "5"]),
+    } as never);
+    mockedFetchAppStoreLookupAppDocs.mockResolvedValue([]);
+
+    await expect(
+      enrichKeyword(
+        {
+          keyword: "word game",
+          country: "US",
+          popularity: 66,
+        },
+        {
+          getAppDocs: async (appIds) =>
+            appIds.map((appId) => ({
+              appId,
+              country: "US",
+              name: `Cached ${appId}`,
+              averageUserRating: 4.5,
+              userRatingCount: 1000,
+              releaseDate: null,
+              currentVersionReleaseDate: null,
+              expiresAt: "2099-01-01T00:00:00.000Z",
+            })),
+        }
+      )
+    ).rejects.toMatchObject({
+      code: "INSUFFICIENT_DOCS",
+      statusCode: 503,
+    });
+  });
+
+  it("detects brand keyword from search lockup publisher", async () => {
+    mockedAsoAppleGet.mockResolvedValue({
+      data: buildSearchHtmlForIds(
+        ["1", "2", "3", "4", "5"],
+        [],
+        {
+          developerNamesById: {
+            "1": "Dream Labs LLC",
+          },
+          ratingCountById: {
+            "1": 1500,
+          },
+        }
+      ),
+    } as never);
+
+    const result = await enrichKeyword(
+      {
+        keyword: "dream labs",
+        country: "US",
+        popularity: 66,
+      },
+      {
+        getAppDocs: async () => buildCompleteCachedTopDocs(["1", "2", "3", "4", "5"]),
+      }
+    );
+
+    expect(result.isBrandKeyword).toBe(true);
+  });
+
+  it("detects brand keyword from lookup fallback publisher", async () => {
+    mockedAsoAppleGet
+      .mockResolvedValueOnce({
+        data: "<html><body>no serialized data</body></html>",
+      } as never)
+      .mockResolvedValueOnce({
+        data: {
+          pageData: {
+            bubbles: [
+              {
+                name: "software",
+                results: [
+                  { id: "1" },
+                  { id: "2" },
+                  { id: "3" },
+                  { id: "4" },
+                  { id: "5" },
+                ],
+              },
+            ],
+          },
+        },
+      } as never);
+    mockedFetchAppStoreLookupAppDocs.mockResolvedValue(
+      buildCompleteCachedTopDocs(["1", "2", "3", "4", "5"], {
+        publisherNamesById: {
+          "1": "Acme Studios",
+          "2": "Other One",
+          "3": "Other Two",
+          "4": "Other Three",
+          "5": "Other Four",
+        },
+      }).map((doc) => ({
+        ...doc,
+        userRatingCount: doc.appId === "1" ? 2000 : doc.userRatingCount,
+      }))
+    );
+
+    const result = await enrichKeyword({
+      keyword: "acme studios",
+      country: "US",
+      popularity: 66,
+    });
+
+    expect(result.isBrandKeyword).toBe(true);
+  });
+
+  it("returns non-brand when #1 publisher tokens do not match keyword", async () => {
+    mockedAsoAppleGet.mockResolvedValue({
+      data: buildSearchHtmlForIds(
+        ["1", "2", "3", "4", "5"],
+        [],
+        {
+          developerNamesById: {
+            "1": "Different Publisher",
+          },
+          ratingCountById: {
+            "1": 3000,
+          },
+        }
+      ),
+    } as never);
+
+    const result = await enrichKeyword(
+      {
+        keyword: "acme sleep",
+        country: "US",
+        popularity: 66,
+      },
+      {
+        getAppDocs: async () => buildCompleteCachedTopDocs(["1", "2", "3", "4", "5"]),
+      }
+    );
+
+    expect(result.isBrandKeyword).toBe(false);
+  });
+
+  it("marks weak leader as brand when independent runner-up median ratings are strong", async () => {
+    mockedAsoAppleGet.mockResolvedValue({
+      data: buildSearchHtmlForIds(
+        ["1", "2", "3", "4", "5"],
+        [],
+        {
+          developerNamesById: {
+            "1": "Acme Labs",
+            "2": "Runner A",
+            "3": "Runner B",
+            "4": "Runner C",
+            "5": "Runner D",
+          },
+          ratingCountById: {
+            "1": 500,
+            "2": 12000,
+            "3": 15000,
+            "4": 20000,
+            "5": 8000,
+          },
+        }
+      ),
+    } as never);
+
+    const result = await enrichKeyword(
+      {
+        keyword: "acme labs",
+        country: "US",
+        popularity: 66,
+      },
+      {
+        getAppDocs: async () => buildCompleteCachedTopDocs(["1", "2", "3", "4", "5"]),
+      }
+    );
+
+    expect(result.isBrandKeyword).toBe(true);
+  });
+
+  it("marks weak leader as non-brand when independent runner-up median ratings are weak", async () => {
+    mockedAsoAppleGet.mockResolvedValue({
+      data: buildSearchHtmlForIds(
+        ["1", "2", "3", "4", "5"],
+        [],
+        {
+          developerNamesById: {
+            "1": "Acme Labs",
+            "2": "Runner A",
+            "3": "Runner B",
+            "4": "Runner C",
+            "5": "Runner D",
+          },
+          ratingCountById: {
+            "1": 500,
+            "2": 1000,
+            "3": 2000,
+            "4": 5000,
+            "5": 7000,
+          },
+        }
+      ),
+    } as never);
+
+    const result = await enrichKeyword(
+      {
+        keyword: "acme labs",
+        country: "US",
+        popularity: 66,
+      },
+      {
+        getAppDocs: async () => buildCompleteCachedTopDocs(["1", "2", "3", "4", "5"]),
+      }
+    );
+
+    expect(result.isBrandKeyword).toBe(false);
+  });
+
+  it("defaults brand detection to false when publisher metadata is missing", async () => {
+    mockedAsoAppleGet.mockResolvedValue({
+      data: buildSearchHtmlForIds(["1", "2", "3", "4", "5"]),
+    } as never);
+
+    const result = await enrichKeyword(
+      {
+        keyword: "acme labs",
+        country: "US",
+        popularity: 66,
+      },
+      {
+        getAppDocs: async () =>
+          buildCompleteCachedTopDocs(["1", "2", "3", "4", "5"]).map((doc) => {
+            const { publisherName, ...rest } = doc;
+            return rest;
+          }),
+      }
+    );
+
+    expect(result.isBrandKeyword).toBe(false);
+  });
 });

@@ -33,6 +33,21 @@ function setupMatchMediaMock(): void {
   });
 }
 
+function emptyKeywordPagedPayload() {
+  return {
+    items: [],
+    page: 1,
+    pageSize: 100,
+    totalCount: 0,
+    totalPages: 1,
+    hasPrevPage: false,
+    hasNextPage: false,
+    associatedCount: 0,
+    failedCount: 0,
+    pendingCount: 0,
+  };
+}
+
 describe("dashboard auth modal UI flow", () => {
   beforeEach(() => {
     setupMatchMediaMock();
@@ -48,7 +63,10 @@ describe("dashboard auth modal UI flow", () => {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
-        return jsonResponse({ status: 200, body: { success: true, data: [] } });
+        return jsonResponse({
+          status: 200,
+          body: { success: true, data: emptyKeywordPagedPayload() },
+        });
       }
       if (method === "GET" && url === "/api/aso/refresh-status") {
         return jsonResponse({
@@ -151,7 +169,10 @@ describe("dashboard auth modal UI flow", () => {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
-        return jsonResponse({ status: 200, body: { success: true, data: [] } });
+        return jsonResponse({
+          status: 200,
+          body: { success: true, data: emptyKeywordPagedPayload() },
+        });
       }
       if (method === "GET" && url === "/api/aso/refresh-status") {
         return jsonResponse({
@@ -271,7 +292,10 @@ describe("dashboard auth modal UI flow", () => {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
-        return jsonResponse({ status: 200, body: { success: true, data: [] } });
+        return jsonResponse({
+          status: 200,
+          body: { success: true, data: emptyKeywordPagedPayload() },
+        });
       }
       if (method === "GET" && url === "/api/aso/refresh-status") {
         return jsonResponse({
@@ -369,7 +393,10 @@ describe("dashboard auth modal UI flow", () => {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
-        return jsonResponse({ status: 200, body: { success: true, data: [] } });
+        return jsonResponse({
+          status: 200,
+          body: { success: true, data: emptyKeywordPagedPayload() },
+        });
       }
       if (method === "GET" && url === "/api/aso/refresh-status") {
         return jsonResponse({
@@ -431,7 +458,10 @@ describe("dashboard auth modal UI flow", () => {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
-        return jsonResponse({ status: 200, body: { success: true, data: [] } });
+        return jsonResponse({
+          status: 200,
+          body: { success: true, data: emptyKeywordPagedPayload() },
+        });
       }
       if (method === "GET" && url === "/api/aso/refresh-status") {
         return jsonResponse({

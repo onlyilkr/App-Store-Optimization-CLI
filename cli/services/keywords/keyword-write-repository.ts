@@ -9,20 +9,32 @@ import {
   setPreviousPosition,
 } from "../../db/app-keywords";
 import {
+  insertAppKeywordPositionHistoryPoints,
+  pruneAppKeywordPositionHistoryBefore,
+} from "../../db/app-keyword-position-history";
+import { getMetadataValue, setMetadataValue } from "../../db/metadata";
+import {
   computeOrderExpiryIso,
   computePopularityExpiryIso,
   normalizeKeyword,
 } from "../../shared/aso-keyword-utils";
+import type { KeywordMatchType } from "../../shared/aso-keyword-match";
 import type { FailedKeyword } from "../../shared/aso-keyword-types";
-import type { AsoDifficultyState } from "../../shared/aso-difficulty-state";
+
+const POSITION_HISTORY_RETENTION_DAYS = 90;
+const POSITION_HISTORY_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const POSITION_HISTORY_LAST_PRUNED_METADATA_KEY =
+  "app-keyword-position-history-pruned-at";
 
 type KeywordWriteItem = {
   keyword: string;
   normalizedKeyword?: string;
   popularity: number;
   difficultyScore: number | null;
-  difficultyState?: AsoDifficultyState;
+  minDifficultyScore: number | null;
+  isBrandKeyword?: boolean | null;
   appCount: number | null;
+  keywordMatch: KeywordMatchType | null;
   orderedAppIds: string[];
   createdAt?: string;
   updatedAt?: string;
@@ -34,6 +46,7 @@ type CompetitorAppDoc = {
   appId: string;
   name: string;
   subtitle?: string;
+  publisherName?: string;
   averageUserRating: number;
   userRatingCount: number;
   releaseDate?: string | null;
@@ -44,14 +57,43 @@ type CompetitorAppDoc = {
   expiresAt?: string;
 };
 
+function maybePrunePositionHistory(now: Date): void {
+  const nowMs = now.getTime();
+  const lastPrunedAt = getMetadataValue(POSITION_HISTORY_LAST_PRUNED_METADATA_KEY);
+  if (lastPrunedAt) {
+    const lastPrunedMs = Date.parse(lastPrunedAt);
+    if (
+      Number.isFinite(lastPrunedMs) &&
+      nowMs - lastPrunedMs < POSITION_HISTORY_PRUNE_INTERVAL_MS
+    ) {
+      return;
+    }
+  }
+
+  const cutoff = new Date(
+    nowMs - POSITION_HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000
+  ).toISOString();
+  pruneAppKeywordPositionHistoryBefore(cutoff);
+  setMetadataValue(POSITION_HISTORY_LAST_PRUNED_METADATA_KEY, now.toISOString());
+}
+
 export class KeywordWriteRepository {
   upsertKeywordItems(country: string, items: KeywordWriteItem[]): void {
     if (items.length === 0) return;
 
+    const now = new Date();
     const normalizedItems = items.map((item) => ({
       ...item,
       normalizedKeyword: item.normalizedKeyword ?? normalizeKeyword(item.keyword),
+      updatedAt: item.updatedAt ?? now.toISOString(),
     }));
+    const positionHistoryPoints: Array<{
+      appId: string;
+      keyword: string;
+      country: string;
+      position: number;
+      capturedAt: string;
+    }> = [];
     const existingByNormalized = new Map(
       getKeywords(
         country,
@@ -62,14 +104,25 @@ export class KeywordWriteRepository {
     for (const item of normalizedItems) {
       const existing = existingByNormalized.get(item.normalizedKeyword);
       const orderedIds = existing?.orderedAppIds ?? [];
-      if (orderedIds.length === 0) continue;
-
       const associations = getAssociationsForKeyword(item.keyword, country);
       for (const assoc of associations) {
-        const idx = orderedIds.indexOf(assoc.appId);
-        const position = idx >= 0 ? idx + 1 : 0;
-        if (position > 0) {
-          setPreviousPosition(item.keyword, country, assoc.appId, position);
+        if (orderedIds.length > 0) {
+          const idx = orderedIds.indexOf(assoc.appId);
+          const previousPosition = idx >= 0 ? idx + 1 : 0;
+          if (previousPosition > 0) {
+            setPreviousPosition(item.keyword, country, assoc.appId, previousPosition);
+          }
+        }
+
+        const currentIdx = item.orderedAppIds.indexOf(assoc.appId);
+        if (currentIdx >= 0) {
+          positionHistoryPoints.push({
+            appId: assoc.appId,
+            keyword: item.keyword,
+            country,
+            position: currentIdx + 1,
+            capturedAt: item.updatedAt,
+          });
         }
       }
     }
@@ -81,10 +134,10 @@ export class KeywordWriteRepository {
         normalizedKeyword: item.normalizedKeyword,
         popularity: item.popularity,
         difficultyScore: item.difficultyScore,
-        difficultyState:
-          item.difficultyState ??
-          (item.difficultyScore == null ? "pending" : "ready"),
+        minDifficultyScore: item.minDifficultyScore,
+        isBrandKeyword: item.isBrandKeyword ?? null,
         appCount: item.appCount,
+        keywordMatch: item.keywordMatch,
         orderedAppIds: item.orderedAppIds,
         createdAt: item.createdAt,
         updatedAt: item.updatedAt,
@@ -95,6 +148,11 @@ export class KeywordWriteRepository {
           computePopularityExpiryIso(),
       }))
     );
+
+    if (positionHistoryPoints.length > 0) {
+      insertAppKeywordPositionHistoryPoints(positionHistoryPoints);
+      maybePrunePositionHistory(now);
+    }
   }
 
   upsertPopularityOnly(
@@ -109,8 +167,10 @@ export class KeywordWriteRepository {
         normalizedKeyword: normalizeKeyword(item.keyword),
         popularity: item.popularity,
         difficultyScore: null,
-        difficultyState: "pending",
+        minDifficultyScore: null,
+        isBrandKeyword: null,
         appCount: null,
+        keywordMatch: null,
         orderedAppIds: [],
         orderExpiresAt: computeOrderExpiryIso(),
         popularityExpiresAt: computePopularityExpiryIso(),
@@ -120,37 +180,6 @@ export class KeywordWriteRepository {
 
   persistFailures(country: string, failures: FailedKeyword[]): void {
     if (failures.length === 0) return;
-    const failedKeywords = failures.map((failure) => failure.keyword);
-    if (failedKeywords.length > 0) {
-      const existingByKeyword = new Map(
-        getKeywords(country, failedKeywords).map((keyword) => [
-          keyword.normalizedKeyword,
-          keyword,
-        ])
-      );
-      const now = new Date().toISOString();
-      const updates = failedKeywords.flatMap((keyword) => {
-        const normalizedKeyword = normalizeKeyword(keyword);
-        const existing = existingByKeyword.get(normalizedKeyword);
-        if (!existing) return [];
-        return [
-          {
-            keyword: existing.keyword,
-            normalizedKeyword: existing.normalizedKeyword,
-            popularity: existing.popularity,
-            difficultyScore: existing.difficultyScore,
-            difficultyState: "failed" as const,
-            appCount: existing.appCount,
-            orderedAppIds: existing.orderedAppIds,
-            createdAt: existing.createdAt,
-            updatedAt: now,
-            orderExpiresAt: existing.orderExpiresAt,
-            popularityExpiresAt: existing.popularityExpiresAt,
-          },
-        ];
-      });
-      this.upsertKeywordItems(country, updates);
-    }
     upsertKeywordFailures(
       country,
       failures.map((failure) => ({
@@ -180,6 +209,7 @@ export class KeywordWriteRepository {
         appId: doc.appId,
         name: doc.name,
         subtitle: doc.subtitle,
+        publisherName: doc.publisherName,
         averageUserRating: doc.averageUserRating,
         userRatingCount: doc.userRatingCount,
         releaseDate: doc.releaseDate,

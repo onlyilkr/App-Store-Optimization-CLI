@@ -1,99 +1,154 @@
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
-import { getKeyword } from "../../db/aso-keywords";
-import { listKeywordFailures } from "../../db/aso-keyword-failures";
-import { closeDbForTests } from "../../db/store";
-import { keywordWriteRepository } from "./keyword-write-repository";
+import { jest } from "@jest/globals";
+import { KeywordWriteRepository } from "./keyword-write-repository";
+import { getKeywords, upsertKeywords } from "../../db/aso-keywords";
+import {
+  getAssociationsForKeyword,
+  setPreviousPosition,
+} from "../../db/app-keywords";
+import {
+  insertAppKeywordPositionHistoryPoints,
+  pruneAppKeywordPositionHistoryBefore,
+} from "../../db/app-keyword-position-history";
+import { getMetadataValue, setMetadataValue } from "../../db/metadata";
 
-const TEST_DB_PATH = path.join(
-  os.tmpdir(),
-  `aso-keyword-write-repository-${process.pid}-${Date.now()}.sqlite`
-);
+jest.mock("../../db/aso-keywords", () => ({
+  getKeywords: jest.fn(() => []),
+  upsertKeywords: jest.fn(),
+}));
 
-function cleanDbFiles(): void {
-  for (const suffix of ["", "-wal", "-shm"]) {
-    try {
-      fs.unlinkSync(`${TEST_DB_PATH}${suffix}`);
-    } catch {}
-  }
-}
+jest.mock("../../db/app-keywords", () => ({
+  getAssociationsForKeyword: jest.fn(() => []),
+  setPreviousPosition: jest.fn(),
+}));
+
+jest.mock("../../db/app-keyword-position-history", () => ({
+  insertAppKeywordPositionHistoryPoints: jest.fn(),
+  pruneAppKeywordPositionHistoryBefore: jest.fn(() => 0),
+}));
+
+jest.mock("../../db/metadata", () => ({
+  getMetadataValue: jest.fn(() => null),
+  setMetadataValue: jest.fn(),
+}));
 
 describe("keyword-write-repository", () => {
-  beforeAll(() => {
-    process.env.ASO_DB_PATH = TEST_DB_PATH;
-  });
+  const mockGetKeywords = jest.mocked(getKeywords);
+  const mockUpsertKeywords = jest.mocked(upsertKeywords);
+  const mockGetAssociationsForKeyword = jest.mocked(getAssociationsForKeyword);
+  const mockSetPreviousPosition = jest.mocked(setPreviousPosition);
+  const mockInsertAppKeywordPositionHistoryPoints = jest.mocked(
+    insertAppKeywordPositionHistoryPoints
+  );
+  const mockPruneAppKeywordPositionHistoryBefore = jest.mocked(
+    pruneAppKeywordPositionHistoryBefore
+  );
+  const mockGetMetadataValue = jest.mocked(getMetadataValue);
+  const mockSetMetadataValue = jest.mocked(setMetadataValue);
 
   beforeEach(() => {
-    closeDbForTests();
-    cleanDbFiles();
+    jest.clearAllMocks();
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-04-13T00:00:00.000Z"));
+    mockGetKeywords.mockReturnValue([]);
+    mockGetAssociationsForKeyword.mockReturnValue([]);
+    mockGetMetadataValue.mockReturnValue(null);
   });
 
-  afterAll(() => {
-    closeDbForTests();
-    cleanDbFiles();
-    delete process.env.ASO_DB_PATH;
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
-  it("persists popularity-only rows as pending", () => {
-    keywordWriteRepository.upsertPopularityOnly("US", [
-      { keyword: "pending-term", popularity: 18 },
+  it("appends ranked history points and updates previous position baseline", () => {
+    const repository = new KeywordWriteRepository();
+    mockGetKeywords.mockReturnValue([
+      {
+        keyword: "term",
+        normalizedKeyword: "term",
+        country: "US",
+        popularity: 50,
+        difficultyScore: 40,
+        minDifficultyScore: 20,
+        isBrandKeyword: null,
+        appCount: 100,
+        keywordMatch: "none",
+        orderedAppIds: ["app-1", "app-2"],
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:00:00.000Z",
+        orderExpiresAt: "2026-04-02T00:00:00.000Z",
+        popularityExpiresAt: "2026-04-02T00:00:00.000Z",
+      },
+    ]);
+    mockGetAssociationsForKeyword.mockReturnValue([
+      {
+        appId: "app-1",
+        keyword: "term",
+        country: "US",
+        isFavorite: false,
+        previousPosition: null,
+      },
     ]);
 
-    const row = getKeyword("US", "pending-term");
-    expect(row?.difficultyScore).toBeNull();
-    expect(row?.difficultyState).toBe("pending");
+    repository.upsertKeywordItems("US", [
+      {
+        keyword: "term",
+        popularity: 55,
+        difficultyScore: 38,
+        minDifficultyScore: 19,
+        isBrandKeyword: false,
+        appCount: 100,
+        keywordMatch: "titleExactPhrase",
+        orderedAppIds: ["app-2", "app-1"],
+      },
+    ]);
+
+    expect(mockSetPreviousPosition).toHaveBeenCalledWith("term", "US", "app-1", 1);
+    expect(mockUpsertKeywords).toHaveBeenCalledTimes(1);
+    expect(mockInsertAppKeywordPositionHistoryPoints).toHaveBeenCalledWith([
+      {
+        appId: "app-1",
+        keyword: "term",
+        country: "US",
+        position: 2,
+        capturedAt: "2026-04-13T00:00:00.000Z",
+      },
+    ]);
+    expect(mockPruneAppKeywordPositionHistoryBefore).toHaveBeenCalledWith(
+      "2026-01-13T00:00:00.000Z"
+    );
+    expect(mockSetMetadataValue).toHaveBeenCalledWith(
+      "app-keyword-position-history-pruned-at",
+      "2026-04-13T00:00:00.000Z"
+    );
   });
 
-  it("persists explicit paywalled state distinctly from pending/failed", () => {
-    keywordWriteRepository.upsertKeywordItems("US", [
+  it("skips daily prune when prune watermark is still fresh", () => {
+    const repository = new KeywordWriteRepository();
+    mockGetAssociationsForKeyword.mockReturnValue([
       {
-        keyword: "paywalled-term",
-        popularity: 24,
-        difficultyScore: null,
-        difficultyState: "paywalled",
-        appCount: 40,
+        appId: "app-1",
+        keyword: "term",
+        country: "US",
+        isFavorite: false,
+        previousPosition: null,
+      },
+    ]);
+    mockGetMetadataValue.mockReturnValue("2026-04-12T12:00:00.000Z");
+
+    repository.upsertKeywordItems("US", [
+      {
+        keyword: "term",
+        popularity: 55,
+        difficultyScore: 38,
+        minDifficultyScore: 19,
+        isBrandKeyword: false,
+        appCount: 100,
+        keywordMatch: "titleExactPhrase",
         orderedAppIds: ["app-1"],
       },
     ]);
 
-    const row = getKeyword("US", "paywalled-term");
-    expect(row?.difficultyScore).toBeNull();
-    expect(row?.difficultyState).toBe("paywalled");
-  });
-
-  it("marks existing keyword rows as failed when persisting failures", () => {
-    keywordWriteRepository.upsertKeywordItems("US", [
-      {
-        keyword: "failed-term",
-        popularity: 31,
-        difficultyScore: 26,
-        difficultyState: "ready",
-        appCount: 80,
-        orderedAppIds: ["app-1", "app-2"],
-      },
-    ]);
-
-    keywordWriteRepository.persistFailures("US", [
-      {
-        keyword: "failed-term",
-        stage: "enrichment",
-        reasonCode: "PLAN_REQUIRED",
-        message: "Difficulty scoring is not available for this plan.",
-        statusCode: 402,
-        retryable: false,
-        attempts: 1,
-      },
-    ]);
-
-    const row = getKeyword("US", "failed-term");
-    const failures = listKeywordFailures("US");
-    expect(row?.difficultyScore).toBe(26);
-    expect(row?.difficultyState).toBe("failed");
-    expect(failures).toHaveLength(1);
-    expect(failures[0]).toMatchObject({
-      keyword: "failed-term",
-      reasonCode: "PLAN_REQUIRED",
-    });
+    expect(mockInsertAppKeywordPositionHistoryPoints).toHaveBeenCalledTimes(1);
+    expect(mockPruneAppKeywordPositionHistoryBefore).not.toHaveBeenCalled();
+    expect(mockSetMetadataValue).not.toHaveBeenCalled();
   });
 });

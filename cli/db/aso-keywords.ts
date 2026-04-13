@@ -1,10 +1,11 @@
 import type { StoredAsoKeyword } from "./types";
 import { getDb } from "./store";
 import { computePopularityExpiryIso } from "../shared/aso-keyword-utils";
-import { normalizeKeyword } from "../domain/keywords/policy";
 import {
-  type AsoDifficultyState,
-} from "../shared/aso-difficulty-state";
+  isKeywordMatchType,
+  type KeywordMatchType,
+} from "../shared/aso-keyword-match";
+import { normalizeKeyword } from "../domain/keywords/policy";
 
 type KeywordRow = {
   country: string;
@@ -12,8 +13,10 @@ type KeywordRow = {
   keyword: string;
   popularity: number;
   difficulty_score: number | null;
-  difficulty_state: AsoDifficultyState;
+  min_difficulty_score: number | null;
+  is_brand_keyword: number | null;
   app_count: number | null;
+  keyword_match: string | null;
   ordered_app_ids: string;
   created_at: string;
   updated_at: string;
@@ -42,8 +45,11 @@ function toStoredKeyword(row: KeywordRow): StoredAsoKeyword {
     country: row.country,
     popularity: row.popularity,
     difficultyScore: row.difficulty_score,
-    difficultyState: row.difficulty_state,
+    minDifficultyScore: row.min_difficulty_score,
+    isBrandKeyword:
+      row.is_brand_keyword == null ? null : row.is_brand_keyword === 1,
     appCount: row.app_count,
+    keywordMatch: isKeywordMatchType(row.keyword_match) ? row.keyword_match : null,
     orderedAppIds,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -57,7 +63,7 @@ export function getKeyword(country: string, keyword: string): StoredAsoKeyword |
   const row = db
     .prepare(
       `SELECT country, normalized_keyword, keyword, popularity, difficulty_score,
-              difficulty_state, app_count, ordered_app_ids,
+              min_difficulty_score, is_brand_keyword, app_count, keyword_match, ordered_app_ids,
               created_at, updated_at, order_expires_at, popularity_expires_at
        FROM aso_keywords
        WHERE country = ? AND normalized_keyword = ?`
@@ -72,7 +78,7 @@ export function listKeywords(country: string): StoredAsoKeyword[] {
   const rows = db
     .prepare(
       `SELECT country, normalized_keyword, keyword, popularity, difficulty_score,
-              difficulty_state, app_count, ordered_app_ids,
+              min_difficulty_score, is_brand_keyword, app_count, keyword_match, ordered_app_ids,
               created_at, updated_at, order_expires_at, popularity_expires_at
        FROM aso_keywords
        WHERE country = ?
@@ -96,7 +102,7 @@ export function getKeywords(
   const rows = db
     .prepare(
       `SELECT country, normalized_keyword, keyword, popularity, difficulty_score,
-              difficulty_state, app_count, ordered_app_ids,
+              min_difficulty_score, is_brand_keyword, app_count, keyword_match, ordered_app_ids,
               created_at, updated_at, order_expires_at, popularity_expires_at
        FROM aso_keywords
        WHERE country = ? AND normalized_keyword IN (${placeholders})`
@@ -112,8 +118,10 @@ export function upsertKeywords(
     normalizedKeyword?: string;
     popularity: number;
     difficultyScore: number | null;
-    difficultyState?: AsoDifficultyState;
+    minDifficultyScore: number | null;
+    isBrandKeyword?: boolean | null;
     appCount: number | null;
+    keywordMatch: KeywordMatchType | null;
     orderedAppIds: string[];
     createdAt?: string;
     updatedAt?: string;
@@ -132,20 +140,22 @@ export function upsertKeywords(
   const upsertStmt = db.prepare(`
     INSERT INTO aso_keywords (
       country, normalized_keyword, keyword, popularity, difficulty_score,
-      difficulty_state, app_count, ordered_app_ids,
+      min_difficulty_score, is_brand_keyword, app_count, keyword_match, ordered_app_ids,
       created_at, updated_at, order_expires_at, popularity_expires_at
     )
     VALUES (
       @country, @normalizedKeyword, @keyword, @popularity, @difficultyScore,
-      @difficultyState, @appCount, @orderedAppIds,
+      @minDifficultyScore, @isBrandKeyword, @appCount, @keywordMatch, @orderedAppIds,
       @createdAt, @updatedAt, @orderExpiresAt, @popularityExpiresAt
     )
     ON CONFLICT(country, normalized_keyword) DO UPDATE SET
       keyword = excluded.keyword,
       popularity = excluded.popularity,
       difficulty_score = excluded.difficulty_score,
-      difficulty_state = excluded.difficulty_state,
+      min_difficulty_score = excluded.min_difficulty_score,
+      is_brand_keyword = excluded.is_brand_keyword,
       app_count = excluded.app_count,
+      keyword_match = excluded.keyword_match,
       ordered_app_ids = excluded.ordered_app_ids,
       updated_at = excluded.updated_at,
       order_expires_at = excluded.order_expires_at,
@@ -163,10 +173,10 @@ export function upsertKeywords(
         country,
         popularity: item.popularity,
         difficultyScore: roundNullableScore(item.difficultyScore),
-        difficultyState:
-          item.difficultyState ??
-          (item.difficultyScore == null ? "pending" : "ready"),
+        minDifficultyScore: roundNullableScore(item.minDifficultyScore),
+        isBrandKeyword: item.isBrandKeyword ?? null,
         appCount: item.appCount,
+        keywordMatch: item.keywordMatch,
         orderedAppIds: item.orderedAppIds,
         createdAt: item.createdAt ?? existing?.created_at ?? now,
         updatedAt: item.updatedAt ?? now,
@@ -182,8 +192,15 @@ export function upsertKeywords(
         keyword: record.keyword,
         popularity: record.popularity,
         difficultyScore: record.difficultyScore,
-        difficultyState: record.difficultyState,
+        minDifficultyScore: record.minDifficultyScore,
+        isBrandKeyword:
+          record.isBrandKeyword == null
+            ? null
+            : record.isBrandKeyword
+              ? 1
+              : 0,
         appCount: record.appCount,
+        keywordMatch: record.keywordMatch,
         orderedAppIds: JSON.stringify(record.orderedAppIds),
         createdAt: record.createdAt,
         updatedAt: record.updatedAt,

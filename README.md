@@ -16,7 +16,7 @@ Research ASO keywords, inspect competition, and manage results from one local-fi
 ## What Is It?
 
 - Fast, free keyword research and visibility tracking
-- Keyword scoring with popularity + difficulty in one command
+- Keyword scoring with popularity + difficulty + brand classification in one command
 - Local ASO dashboard for reviewing keyword/app data
 - MCP tool (`aso_evaluate_keywords`) for agent workflows and automated keyword research
 
@@ -125,7 +125,8 @@ Association behavior for `aso keywords`:
       "keyword": "meditation",
       "popularity": 45,
       "difficultyScore": 62,
-      "minDifficultyScore": 38
+      "minDifficultyScore": 38,
+      "isBrandKeyword": false
     }
   ],
   "failedKeywords": [],
@@ -166,7 +167,7 @@ This package also installs `aso-mcp` with tool: `aso_evaluate_keywords`.
 - `minPopularity = 6` (floor: `6`)
 - `maxDifficulty = 70`
 
-MCP returns only accepted rows (`keyword`, `popularity`, `difficulty`, `minDifficultyScore`).
+MCP returns only accepted rows (`keyword`, `popularity`, `difficulty`, `minDifficultyScore`, `isBrandKeyword`).
 
 Example MCP config:
 

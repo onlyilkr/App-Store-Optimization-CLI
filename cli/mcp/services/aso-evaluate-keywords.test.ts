@@ -96,7 +96,10 @@ describe("aso_evaluate_keywords service", () => {
             keyword: "romantic",
             popularity: 20,
             difficulty: 40,
+            minDifficultyScore: 51.43,
+            isBrandKeyword: true,
             appCount: 179,
+            keywordMatch: "titleAllWords",
           },
         ],
         failedKeywords: [{ keyword: "failed", stage: "enrichment" }],
@@ -129,36 +132,8 @@ describe("aso_evaluate_keywords service", () => {
         keyword: "romantic",
         popularity: 20,
         difficulty: 40,
-      },
-    ]);
-  });
-
-  it("preserves accepted rows when difficulty is null", async () => {
-    mockRunAsoCommand.mockResolvedValue({
-      stdout: JSON.stringify({
-        items: [
-          {
-            keyword: "masked-term",
-            popularity: 44,
-            difficultyScore: null,
-          },
-        ],
-        failedKeywords: [],
-        filteredOut: [],
-      }),
-      stderr: "",
-      exitCode: 0,
-    });
-
-    const result = await handleAsoEvaluateKeywords({
-      keywords: ["masked-term"],
-    });
-
-    expect(JSON.parse(result.content[0]?.text ?? "")).toEqual([
-      {
-        keyword: "masked-term",
-        popularity: 44,
-        difficulty: null,
+        minDifficultyScore: 51.43,
+        isBrandKeyword: true,
       },
     ]);
   });

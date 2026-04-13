@@ -10,6 +10,7 @@ import {
   getAssociationsForKeyword,
   deleteAppKeywords,
   getAppLastKeywordAddedAtMap,
+  setAppKeywordFavorite,
 } from "./app-keywords";
 import { closeDbForTests } from "./store";
 
@@ -47,6 +48,7 @@ describe("app-keywords", () => {
     const rows = listByApp("app1", "US");
     expect(rows).toHaveLength(1);
     expect(rows[0].keyword).toBe("mixedcase");
+    expect(rows[0].isFavorite).toBe(false);
     expect(rows[0].previousPosition).toBeNull();
   });
 
@@ -79,6 +81,19 @@ describe("app-keywords", () => {
     createAppKeyword("app3", "shared", "GB");
     const rows = getAssociationsForKeyword(" SHARED ", "US");
     expect(rows.map((r) => r.appId).sort()).toEqual(["app1", "app2"]);
+    expect(rows.every((row) => row.isFavorite === false)).toBe(true);
+  });
+
+  it("sets keyword favorite per app association", () => {
+    createAppKeyword("app1", "shared", "US");
+    createAppKeyword("app2", "shared", "US");
+    const updated = setAppKeywordFavorite("app1", "shared", true, "US");
+    expect(updated).toBe(true);
+
+    const app1 = listByApp("app1", "US");
+    const app2 = listByApp("app2", "US");
+    expect(app1[0]?.isFavorite).toBe(true);
+    expect(app2[0]?.isFavorite).toBe(false);
   });
 
   it("deletes app-keyword associations for matching app/country", () => {

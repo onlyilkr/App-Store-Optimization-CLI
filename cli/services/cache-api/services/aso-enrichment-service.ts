@@ -2,6 +2,7 @@ import { logger } from "../../../utils/logger";
 import {
   computeAppExpiryIsoForApp,
   normalizeKeyword,
+  normalizeTextForKeywordMatch,
 } from "./aso-keyword-utils";
 import {
   fetchAppStoreAdditionalLocalizations,
@@ -12,9 +13,14 @@ import type { AsoAppDoc, AsoAppDocIcon } from "./aso-types";
 import { asoAppleGet } from "./aso-apple-client";
 import { reportAppleContractChange } from "../../keywords/apple-http-trace";
 import { getStorefrontDefaultLanguage } from "../../../shared/aso-storefront-localizations";
+import type { KeywordMatchType } from "../../../shared/aso-keyword-match";
+import {
+  calculateAppDifficultyBreakdown,
+  calculateKeywordDifficultyBreakdown,
+  keywordMatchToScore,
+} from "./aso-difficulty";
 import {
   hasRequiredTopDifficultyDocs,
-  listMissingTopDifficultyDocIds,
   requiresTopDifficultyDocs,
   TOP_DIFFICULTY_DOC_LIMIT,
 } from "../../../shared/aso-difficulty-policy";
@@ -32,6 +38,7 @@ interface AmpSearchLockup {
   adamId?: string;
   title?: string;
   subtitle?: string | null;
+  developerName?: string;
   icon?: {
     template?: string;
     width?: number;
@@ -91,6 +98,13 @@ class InsufficientDifficultyDocsError extends Error {
   }
 }
 
+function safeDaysSince(isoDate: string | undefined): number {
+  if (!isoDate) return 365;
+  const parsed = Date.parse(isoDate);
+  if (Number.isNaN(parsed)) return 365;
+  return Math.max(1, Math.floor((Date.now() - parsed) / (1000 * 60 * 60 * 24)));
+}
+
 function parseRatingCount(value: string | number | undefined): number {
   if (value == null) return 0;
   if (typeof value === "number" && !Number.isNaN(value)) return Math.max(0, value);
@@ -101,6 +115,150 @@ function parseRatingCount(value: string | number | undefined): number {
   if (s.endsWith("M")) return Math.round(num * 1000000);
   if (s.endsWith("K")) return Math.round(num * 1000);
   return Math.round(num);
+}
+
+function detectKeywordMatchType(
+  name: string,
+  subtitle: string | undefined,
+  keyword: string
+): KeywordMatchType {
+  const normKeyword = normalizeTextForKeywordMatch(keyword);
+  const keywordParts = new Set(normKeyword.split(" ").filter(Boolean));
+  const normTitle = normalizeTextForKeywordMatch(name);
+
+  if (normTitle.includes(normKeyword)) return "titleExactPhrase";
+
+  const titleWords = new Set(normTitle.split(" ").filter(Boolean));
+  if (
+    keywordParts.size > 0 &&
+    [...keywordParts].every((w) => titleWords.has(w))
+  )
+    return "titleAllWords";
+
+  const normSubtitle = normalizeTextForKeywordMatch(subtitle || "");
+  if (normSubtitle && normSubtitle.includes(normKeyword)) return "subtitleExactPhrase";
+
+  const combined = `${normTitle} ${normSubtitle}`.trim();
+  if (combined.includes(normKeyword)) return "combinedPhrase";
+
+  const subtitleWords = new Set(normSubtitle.split(" ").filter(Boolean));
+  if (
+    keywordParts.size > 0 &&
+    subtitleWords.size > 0 &&
+    [...keywordParts].every((w) => subtitleWords.has(w))
+  ) {
+    return "subtitleAllWords";
+  }
+
+  return "none";
+}
+
+function detectBestKeywordMatchType(app: AsoAppDoc, keyword: string): KeywordMatchType {
+  const localizations: Array<{ name: string; subtitle?: string }> = [
+    { name: app.name, subtitle: app.subtitle },
+  ];
+  for (const localized of Object.values(app.additionalLocalizations ?? {})) {
+    localizations.push({
+      name: localized.name,
+      subtitle: localized.subtitle,
+    });
+  }
+
+  let bestMatch: KeywordMatchType = "none";
+  let bestScore = 0;
+  for (const localized of localizations) {
+    const match = detectKeywordMatchType(localized.name, localized.subtitle, keyword);
+    const score = keywordMatchToScore(match);
+    if (score > bestScore) {
+      bestMatch = match;
+      bestScore = score;
+      if (bestScore >= 1) {
+        break;
+      }
+    }
+  }
+  return bestMatch;
+}
+
+function detectTopKeywordMatchType(apps: AsoAppDoc[], keyword: string): KeywordMatchType {
+  let topMatch: KeywordMatchType = "none";
+  let topScore = 0;
+  for (const app of apps) {
+    const match = detectBestKeywordMatchType(app, keyword);
+    const score = keywordMatchToScore(match);
+    if (score > topScore) {
+      topMatch = match;
+      topScore = score;
+      if (topScore >= 1) {
+        break;
+      }
+    }
+  }
+  return topMatch;
+}
+
+function tokenizeForBrand(value: string): string[] {
+  return (value.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter(Boolean);
+}
+
+function detectIsBrandKeyword(keyword: string, apps: AsoAppDoc[]): boolean {
+  const leader = apps[0];
+  if (!leader?.publisherName) return false;
+
+  const keywordTokens = new Set(tokenizeForBrand(keyword));
+  if (keywordTokens.size === 0) return false;
+
+  const leaderPublisherTokens = new Set(tokenizeForBrand(leader.publisherName));
+  if (leaderPublisherTokens.size === 0) return false;
+  for (const token of keywordTokens) {
+    if (!leaderPublisherTokens.has(token)) {
+      return false;
+    }
+  }
+
+  const leaderReviews = Math.max(0, leader.userRatingCount || 0);
+  if (leaderReviews >= 1000) {
+    return true;
+  }
+
+  const leaderPublisher = leader.publisherName.trim().toLowerCase();
+  const independentRunnerUps = apps
+    .slice(1, TOP_DIFFICULTY_DOC_LIMIT)
+    .filter((app) => {
+      const publisher = app.publisherName?.trim().toLowerCase();
+      return Boolean(publisher && publisher !== leaderPublisher);
+    });
+  if (independentRunnerUps.length === 0) {
+    return false;
+  }
+
+  const sortedRunnerUpRatings = independentRunnerUps
+    .map((app) => Math.max(0, app.userRatingCount || 0))
+    .sort((a, b) => a - b);
+  const n = sortedRunnerUpRatings.length;
+  const medianRunnerUpRatings =
+    n % 2 === 1
+      ? sortedRunnerUpRatings[Math.floor(n / 2)]
+      : (sortedRunnerUpRatings[n / 2 - 1] + sortedRunnerUpRatings[n / 2]) / 2;
+  return medianRunnerUpRatings >= 10000;
+}
+
+function appCompetitiveScore(app: AsoAppDoc, keyword: string): number {
+  const ratingCount = app.userRatingCount || 0;
+  const avgRating = app.averageUserRating ?? 0;
+  const lastRelease = app.currentVersionReleaseDate || app.releaseDate;
+  const firstRelease = app.releaseDate;
+  const daysSinceLastRelease = safeDaysSince(lastRelease ?? undefined);
+  const daysSinceFirstRelease = safeDaysSince(firstRelease ?? undefined);
+  const keywordMatch = detectBestKeywordMatchType(app, keyword);
+
+  return calculateAppDifficultyBreakdown({
+    averageUserRating: avgRating,
+    userRatingCount: ratingCount,
+    daysSinceLastRelease,
+    daysSinceFirstRelease,
+    keywordMatch,
+  }).score;
 }
 
 function getStoreFrontHeader(country: string): string {
@@ -182,6 +340,7 @@ function lockupToAppDoc(lockup: AmpSearchLockup, country: string): AsoAppDoc | n
   if (!adamId) return null;
   const name = (lockup?.title ?? "").trim() || "Unknown";
   const subtitle = lockup?.subtitle?.trim() || undefined;
+  const publisherName = lockup?.developerName?.trim() || undefined;
   const rating = lockup?.rating;
   const averageUserRating =
     typeof rating === "number" && !Number.isNaN(rating) ? rating : 0;
@@ -200,6 +359,7 @@ function lockupToAppDoc(lockup: AmpSearchLockup, country: string): AsoAppDoc | n
     country: country.toUpperCase(),
     name,
     subtitle,
+    publisherName,
     averageUserRating,
     userRatingCount,
     icon,
@@ -449,6 +609,7 @@ function mergeSearchFieldsIntoAppDoc(
     country: searchDoc.country,
     name: searchDoc.name,
     subtitle: searchDoc.subtitle,
+    publisherName: searchDoc.publisherName ?? cached.publisherName,
     averageUserRating: searchDoc.averageUserRating,
     userRatingCount: searchDoc.userRatingCount,
     icon: searchDoc.icon,
@@ -516,6 +677,21 @@ function mergeAppDocsById(baseDocs: AsoAppDoc[], incomingDocs: AsoAppDoc[]): Aso
   return merged;
 }
 
+function hasCompleteDifficultyDoc(doc: AsoAppDoc | undefined): boolean {
+  if (!doc) return false;
+  return Boolean(doc.releaseDate && doc.currentVersionReleaseDate);
+}
+
+function listIncompleteTopDifficultyDocIds(params: {
+  orderedAppIds: string[];
+  appDocs: AsoAppDoc[];
+}): string[] {
+  const topIds = params.orderedAppIds.slice(0, TOP_DIFFICULTY_DOC_LIMIT);
+  if (topIds.length === 0) return [];
+  const docsById = new Map(params.appDocs.map((doc) => [doc.appId, doc] as const));
+  return topIds.filter((id) => !hasCompleteDifficultyDoc(docsById.get(id)));
+}
+
 function reorderAppDocsForTopDifficultyIds(params: {
   orderedAppIds: string[];
   appDocs: AsoAppDoc[];
@@ -534,8 +710,8 @@ function reorderAppDocsForTopDifficultyIds(params: {
 function getDocsForDifficultyCount(orderedAppIds: string[], appDocs: AsoAppDoc[]): number {
   const topIds = orderedAppIds.slice(0, TOP_DIFFICULTY_DOC_LIMIT);
   if (topIds.length === 0) return 0;
-  const appDocIds = new Set(appDocs.map((doc) => doc.appId));
-  return topIds.filter((id) => appDocIds.has(id)).length;
+  const docsById = new Map(appDocs.map((doc) => [doc.appId, doc] as const));
+  return topIds.filter((id) => hasCompleteDifficultyDoc(docsById.get(id))).length;
 }
 
 async function backfillMissingTopDifficultyDocs(params: {
@@ -546,7 +722,7 @@ async function backfillMissingTopDifficultyDocs(params: {
   getAppDocs?: (appIds: string[]) => Promise<AsoAppDoc[]>;
 }): Promise<AsoAppDoc[]> {
   let mergedDocs = params.appDocs;
-  let missingTopIds = listMissingTopDifficultyDocIds({
+  let missingTopIds = listIncompleteTopDifficultyDocIds({
     orderedAppIds: params.orderedAppIds,
     appDocs: mergedDocs,
   });
@@ -568,7 +744,7 @@ async function backfillMissingTopDifficultyDocs(params: {
       .map((id) => cachedById.get(id))
       .filter((doc): doc is AsoAppDoc => doc != null);
     mergedDocs = mergeAppDocsById(mergedDocs, cachedMissingDocs);
-    missingTopIds = listMissingTopDifficultyDocIds({
+    missingTopIds = listIncompleteTopDifficultyDocIds({
       orderedAppIds: params.orderedAppIds,
       appDocs: mergedDocs,
     });
@@ -580,7 +756,7 @@ async function backfillMissingTopDifficultyDocs(params: {
       await params.getAppDocs(missingTopIds)
     );
     mergedDocs = mergeAppDocsById(mergedDocs, cachedDocs);
-    missingTopIds = listMissingTopDifficultyDocIds({
+    missingTopIds = listIncompleteTopDifficultyDocIds({
       orderedAppIds: params.orderedAppIds,
       appDocs: mergedDocs,
     });
@@ -618,7 +794,11 @@ export async function enrichKeyword(
   keyword: string;
   normalizedKeyword: string;
   popularity: number;
+  difficultyScore: number;
+  minDifficultyScore: number;
+  isBrandKeyword: boolean;
   appCount: number;
+  keywordMatch: KeywordMatchType;
   orderedAppIds: string[];
   appDocs: AsoAppDoc[];
 }> {
@@ -776,7 +956,7 @@ export async function enrichKeyword(
     country,
   });
 
-  let missingTopIds = listMissingTopDifficultyDocIds({
+  let missingTopIds = listIncompleteTopDifficultyDocIds({
     orderedAppIds,
     appDocs,
   });
@@ -790,7 +970,7 @@ export async function enrichKeyword(
       cachedTopDocs,
       getAppDocs: options?.getAppDocs,
     });
-    missingTopIds = listMissingTopDifficultyDocIds({
+    missingTopIds = listIncompleteTopDifficultyDocIds({
       orderedAppIds,
       appDocs,
     });
@@ -810,7 +990,7 @@ export async function enrichKeyword(
         country,
         getAppDocs: options?.getAppDocs,
       });
-      missingTopIds = listMissingTopDifficultyDocIds({
+      missingTopIds = listIncompleteTopDifficultyDocIds({
         orderedAppIds,
         appDocs,
       });
@@ -822,6 +1002,44 @@ export async function enrichKeyword(
     if (!doc.expiresAt && firstFiveIds.includes(doc.appId)) {
       doc.expiresAt = computeAppExpiryIsoForApp();
     }
+  }
+
+  const docsForDifficulty = firstFiveIds
+    .map((id) => appDocs.find((d) => d.appId === id))
+    .filter((d): d is AsoAppDoc => d != null);
+  const keywordMatch = detectTopKeywordMatchType(docsForDifficulty, params.keyword);
+  const isBrandKeyword = detectIsBrandKeyword(params.keyword, docsForDifficulty);
+
+  if (appCount < TOP_DIFFICULTY_DOC_LIMIT) {
+    logger.debug("[aso-enrichment] returning fallback difficulty due to insufficient docs", {
+      keyword: params.keyword,
+      country,
+      appCount,
+      docsForDifficultyCount,
+      requiredDocsCount: TOP_DIFFICULTY_DOC_LIMIT,
+    });
+    logger.debug("[aso-enrichment] enrich result", {
+      keyword: params.keyword,
+      country,
+      mode: sourceMode,
+      fallbackDifficulty: true,
+      appCount,
+      orderedAppIdsCount: orderedAppIds.length,
+      appDocsCount: appDocs.length,
+      docsForDifficultyCount,
+    });
+    return {
+      keyword: params.keyword,
+      normalizedKeyword,
+      popularity: params.popularity,
+      difficultyScore: 1,
+      minDifficultyScore: 1,
+      isBrandKeyword,
+      appCount,
+      keywordMatch,
+      orderedAppIds,
+      appDocs,
+    };
   }
 
   if (
@@ -848,11 +1066,19 @@ export async function enrichKeyword(
     });
   }
 
+  const competitiveScores = docsForDifficulty.map((app) =>
+    appCompetitiveScore(app, params.keyword)
+  );
+  const difficulty = calculateKeywordDifficultyBreakdown({
+    competitiveScores,
+    appCount,
+  });
+
   logger.debug("[aso-enrichment] enrich result", {
     keyword: params.keyword,
     country,
     mode: sourceMode,
-    difficultyComputedByBackend: true,
+    fallbackDifficulty: false,
     appCount,
     orderedAppIdsCount: orderedAppIds.length,
     appDocsCount: appDocs.length,
@@ -862,7 +1088,11 @@ export async function enrichKeyword(
     keyword: params.keyword,
     normalizedKeyword,
     popularity: params.popularity,
+    difficultyScore: difficulty.difficultyScore,
+    minDifficultyScore: difficulty.minDifficultyScore,
+    isBrandKeyword,
     appCount,
+    keywordMatch,
     orderedAppIds,
     appDocs,
   };

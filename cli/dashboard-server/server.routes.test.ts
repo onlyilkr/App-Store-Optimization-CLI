@@ -12,7 +12,9 @@ import {
   deleteAppKeywordsByAppId,
   getAppLastKeywordAddedAtMap,
   listAllAppKeywords,
+  setAppKeywordFavorite,
 } from "../db/app-keywords";
+import { listAppKeywordPositionHistory } from "../db/app-keyword-position-history";
 import { getKeyword, listKeywords } from "../db/aso-keywords";
 import {
   getKeywordFailures,
@@ -25,6 +27,7 @@ import {
   getAsoAppDocsLocal,
   refreshAsoKeywordOrderLocal,
 } from "../services/keywords/aso-local-cache-service";
+import { getDb } from "../db/store";
 import { asoAuthService } from "../services/auth/aso-auth-service";
 import { keywordPipelineService } from "../services/keywords/keyword-pipeline-service";
 import { isAsoAuthReauthRequiredError } from "../services/keywords/aso-popularity-service";
@@ -32,7 +35,6 @@ import { fetchOwnedAppSnapshotsFromApi } from "./owned-app-details";
 import { createServerRequestHandler } from "./server";
 import { DEFAULT_RESEARCH_APP_ID } from "../shared/aso-research";
 import { logger } from "../utils/logger";
-import { asoBackendClient } from "../services/backend/aso-backend-client";
 
 jest.mock("../db/owned-apps", () => ({
   deleteOwnedAppById: jest.fn(() => 0),
@@ -49,6 +51,11 @@ jest.mock("../db/app-keywords", () => ({
   deleteAppKeywords: jest.fn(() => 0),
   deleteAppKeywordsByAppId: jest.fn(() => 0),
   getAppLastKeywordAddedAtMap: jest.fn(() => new Map()),
+  setAppKeywordFavorite: jest.fn(() => true),
+}));
+
+jest.mock("../db/app-keyword-position-history", () => ({
+  listAppKeywordPositionHistory: jest.fn(() => []),
 }));
 
 jest.mock("../db/aso-keywords", () => ({
@@ -119,6 +126,15 @@ jest.mock("../services/keywords/aso-local-cache-service", () => ({
   })),
 }));
 
+jest.mock("../db/store", () => ({
+  getDb: jest.fn(() => ({
+    prepare: jest.fn(() => ({
+      get: jest.fn(() => undefined),
+      all: jest.fn(() => []),
+    })),
+  })),
+}));
+
 jest.mock("./owned-app-details", () => ({
   fetchOwnedAppSnapshotsFromApi: jest.fn(async () => []),
 }));
@@ -128,13 +144,6 @@ jest.mock("../utils/logger", () => ({
     debug: jest.fn(),
     info: jest.fn(),
     error: jest.fn(),
-  },
-}));
-
-jest.mock("../services/backend/aso-backend-client", () => ({
-  asoBackendClient: {
-    isDifficultyEntitled: jest.fn(async () => true),
-    isTopAppsEntitled: jest.fn(async () => ({ allowed: true })),
   },
 }));
 
@@ -199,19 +208,46 @@ async function request(params: {
   });
 }
 
+function createPagedKeywordDbMock(params: {
+  summary: { total_count: number; failed_count: number; pending_count: number };
+  filteredCount: number;
+  rows: unknown[];
+  associations?: unknown[];
+}) {
+  const getResponses: unknown[] = [
+    params.summary,
+    { total_count: params.filteredCount },
+  ];
+  const allResponses: unknown[][] = [
+    params.rows,
+    params.associations ?? [],
+  ];
+  return {
+    prepare: jest.fn(() => ({
+      get: jest.fn(() => getResponses.shift()),
+      all: jest.fn(() => allResponses.shift() ?? []),
+    })),
+  };
+}
+
 describe("dashboard server routes", () => {
   const mockLogger = jest.mocked(logger);
+  const mockGetDb = jest.mocked(getDb);
   const mockGetOwnedAppById = jest.mocked(getOwnedAppById);
   const mockDeleteOwnedAppById = jest.mocked(deleteOwnedAppById);
   const mockListOwnedApps = jest.mocked(listOwnedApps);
   const mockUpsertOwnedApps = jest.mocked(upsertOwnedApps);
   const mockUpsertOwnedAppSnapshots = jest.mocked(upsertOwnedAppSnapshots);
   const mockGetAppLastKeywordAddedAtMap = jest.mocked(getAppLastKeywordAddedAtMap);
+  const mockListAppKeywordPositionHistory = jest.mocked(
+    listAppKeywordPositionHistory
+  );
   const mockListKeywords = jest.mocked(listKeywords);
   const mockListAllAppKeywords = jest.mocked(listAllAppKeywords);
   const mockGetKeywordFailures = jest.mocked(getKeywordFailures);
   const mockDeleteAppKeywords = jest.mocked(deleteAppKeywords);
   const mockDeleteAppKeywordsByAppId = jest.mocked(deleteAppKeywordsByAppId);
+  const mockSetAppKeywordFavorite = jest.mocked(setAppKeywordFavorite);
   const mockGetKeyword = jest.mocked(getKeyword);
   const mockGetCompetitorAppDocs = jest.mocked(getCompetitorAppDocs);
   const mockUpsertCompetitorAppDocs = jest.mocked(upsertCompetitorAppDocs);
@@ -222,13 +258,18 @@ describe("dashboard server routes", () => {
   const mockFetchKeywordStage = jest.mocked(
     keywordPipelineService.runPopularityStage
   );
+  const mockRefreshOrder = jest.mocked(keywordPipelineService.refreshOrder);
   const mockRetryFailed = jest.mocked(keywordPipelineService.retryFailed);
   const mockIsAsoAuthReauthRequiredError = jest.mocked(isAsoAuthReauthRequiredError);
-  const mockIsDifficultyEntitled = jest.mocked(asoBackendClient.isDifficultyEntitled);
-  const mockIsTopAppsEntitled = jest.mocked(asoBackendClient.isTopAppsEntitled);
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetDb.mockReturnValue({
+      prepare: jest.fn(() => ({
+        get: jest.fn(() => undefined),
+        all: jest.fn(() => []),
+      })),
+    } as any);
     mockGetOwnedAppById.mockReturnValue(null);
     mockDeleteOwnedAppById.mockReturnValue(0);
     mockListOwnedApps.mockReturnValue([]);
@@ -238,6 +279,8 @@ describe("dashboard server routes", () => {
     mockGetKeywordFailures.mockReturnValue([]);
     mockDeleteAppKeywords.mockReturnValue(0);
     mockDeleteAppKeywordsByAppId.mockReturnValue(0);
+    mockSetAppKeywordFavorite.mockReturnValue(true);
+    mockListAppKeywordPositionHistory.mockReturnValue([]);
     mockGetKeyword.mockReturnValue(null);
     mockGetCompetitorAppDocs.mockReturnValue([]);
     mockFetchOwnedAppSnapshotsFromApi.mockResolvedValue([]);
@@ -257,14 +300,13 @@ describe("dashboard server routes", () => {
       failedKeywords: [],
       filteredOut: [],
     });
+    mockRefreshOrder.mockResolvedValue([]);
     mockRetryFailed.mockResolvedValue({
       retriedCount: 0,
       succeededCount: 0,
       failedCount: 0,
     });
     mockIsAsoAuthReauthRequiredError.mockReturnValue(false);
-    mockIsDifficultyEntitled.mockResolvedValue(true);
-    mockIsTopAppsEntitled.mockResolvedValue({ allowed: true });
   });
 
   it("returns health status", async () => {
@@ -534,38 +576,50 @@ describe("dashboard server routes", () => {
   });
 
   it("returns keywords with app-specific positions and failure metadata", async () => {
-    mockListKeywords.mockReturnValue([
-      {
-        keyword: "term",
-        normalizedKeyword: "term",
-        country: "US",
-        popularity: 42,
-        difficultyScore: null,
-        appCount: 10,
-        orderedAppIds: ["app-1", "app-2"],
-      },
-    ] as any);
-    mockListAllAppKeywords.mockReturnValue([
-      {
-        appId: "app-2",
-        keyword: "term",
-        country: "US",
-        previousPosition: 4,
-      },
-    ] as any);
-    mockGetKeywordFailures.mockReturnValue([
-      {
-        normalizedKeyword: "term",
-        stage: "enrichment",
-        reasonCode: "FAILED",
-        message: "boom",
-        statusCode: 500,
-        retryable: true,
-        attempts: 2,
-        requestId: "req-1",
-        updatedAt: "2026-03-12T00:00:00.000Z",
-      },
-    ] as any);
+    mockGetDb.mockReturnValue(
+      createPagedKeywordDbMock({
+        summary: {
+          total_count: 1,
+          failed_count: 1,
+          pending_count: 0,
+        },
+        filteredCount: 1,
+        rows: [
+          {
+            normalized_keyword: "term",
+            keyword: "term",
+            popularity: 42,
+            difficulty_score: null,
+            min_difficulty_score: null,
+            is_brand_keyword: null,
+            app_count: 10,
+            keyword_match: "titleExactPhrase",
+            ordered_app_ids: JSON.stringify(["app-1", "app-2"]),
+            is_favorite: 0,
+            created_at: "2026-03-12T00:00:00.000Z",
+            updated_at: "2026-03-12T00:00:00.000Z",
+            order_expires_at: "2026-03-13T00:00:00.000Z",
+            popularity_expires_at: "2026-03-13T00:00:00.000Z",
+            current_position: 2,
+            failure_stage: "enrichment",
+            failure_reason_code: "FAILED",
+            failure_message: "boom",
+            failure_status_code: 500,
+            failure_retryable: 1,
+            failure_attempts: 2,
+            failure_request_id: "req-1",
+            failure_updated_at: "2026-03-12T00:00:00.000Z",
+          },
+        ],
+        associations: [
+          {
+            app_id: "app-2",
+            keyword: "term",
+            previous_position: 4,
+          },
+        ],
+      }) as any
+    );
 
     const response = await request({
       method: "GET",
@@ -573,48 +627,80 @@ describe("dashboard server routes", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json?.data).toEqual([
+    expect(response.json?.data).toEqual(
       expect.objectContaining({
-        keyword: "term",
-        keywordStatus: "failed",
-        positions: [
-          {
-            appId: "app-2",
-            previousPosition: 4,
-            currentPosition: 2,
-          },
+        page: 1,
+        totalCount: 1,
+        totalPages: 1,
+        associatedCount: 1,
+        failedCount: 1,
+        pendingCount: 0,
+        items: [
+          expect.objectContaining({
+            keyword: "term",
+            keywordStatus: "failed",
+            positions: [
+              {
+                appId: "app-2",
+                previousPosition: 4,
+                currentPosition: 2,
+              },
+            ],
+            failure: expect.objectContaining({
+              reasonCode: "FAILED",
+            }),
+          }),
         ],
-        failure: expect.objectContaining({
-          reasonCode: "FAILED",
-        }),
-      }),
-    ]);
+      })
+    );
     expect(mockLogger.debug).not.toHaveBeenCalled();
   });
 
   it("returns app-associated failed keywords even when keyword cache row is missing", async () => {
-    mockListKeywords.mockReturnValue([]);
-    mockListAllAppKeywords.mockReturnValue([
-      {
-        appId: "app-2",
-        keyword: "lost-term",
-        country: "US",
-        previousPosition: 3,
-      },
-    ] as any);
-    mockGetKeywordFailures.mockReturnValue([
-      {
-        normalizedKeyword: "lost-term",
-        stage: "popularity",
-        reasonCode: "FAILED",
-        message: "upstream failed",
-        statusCode: 500,
-        retryable: true,
-        attempts: 1,
-        requestId: "req-2",
-        updatedAt: "2026-03-12T00:00:00.000Z",
-      },
-    ] as any);
+    mockGetDb.mockReturnValue(
+      createPagedKeywordDbMock({
+        summary: {
+          total_count: 1,
+          failed_count: 1,
+          pending_count: 0,
+        },
+        filteredCount: 1,
+        rows: [
+          {
+            normalized_keyword: "lost-term",
+            keyword: "lost-term",
+            popularity: null,
+            difficulty_score: null,
+            min_difficulty_score: null,
+            is_brand_keyword: null,
+            app_count: null,
+            keyword_match: "none",
+            ordered_app_ids: JSON.stringify([]),
+            is_favorite: 0,
+            created_at: "2026-03-12T00:00:00.000Z",
+            updated_at: "2026-03-12T00:00:00.000Z",
+            order_expires_at: "2026-03-12T00:00:00.000Z",
+            popularity_expires_at: "2026-03-12T00:00:00.000Z",
+            current_position: null,
+            failure_stage: "popularity",
+            failure_reason_code: "FAILED",
+            failure_message: "upstream failed",
+            failure_status_code: 500,
+            failure_retryable: 1,
+            failure_attempts: 1,
+            failure_request_id: "req-2",
+            failure_updated_at: "2026-03-12T00:00:00.000Z",
+          },
+        ],
+        associations: [
+          {
+            app_id: "app-2",
+            keyword: "lost-term",
+            previous_position: 3,
+          },
+        ],
+      }) as any
+    );
 
     const response = await request({
       method: "GET",
@@ -622,62 +708,108 @@ describe("dashboard server routes", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json?.data).toEqual([
+    expect(response.json?.data).toEqual(
       expect.objectContaining({
-        keyword: "lost-term",
-        popularity: null,
-        difficultyScore: null,
-        keywordStatus: "failed",
-        positions: [
-          {
-            appId: "app-2",
-            previousPosition: 3,
-            currentPosition: null,
-          },
+        page: 1,
+        totalCount: 1,
+        totalPages: 1,
+        associatedCount: 1,
+        failedCount: 1,
+        pendingCount: 0,
+        items: [
+          expect.objectContaining({
+            keyword: "lost-term",
+            popularity: null,
+            difficultyScore: null,
+            keywordStatus: "failed",
+            positions: [
+              {
+                appId: "app-2",
+                previousPosition: 3,
+                currentPosition: null,
+              },
+            ],
+            failure: expect.objectContaining({
+              stage: "popularity",
+              reasonCode: "FAILED",
+            }),
+          }),
         ],
-        failure: expect.objectContaining({
-          stage: "popularity",
-          reasonCode: "FAILED",
-        }),
-      }),
-    ]);
+      })
+    );
   });
 
-  it("masks difficulty values in keyword responses when difficulty entitlement is unavailable", async () => {
-    mockIsDifficultyEntitled.mockResolvedValue(false);
-    mockListKeywords.mockReturnValue([
+  it("requires appId for keyword reads", async () => {
+    const response = await request({
+      method: "GET",
+      path: "/api/aso/keywords?country=US",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json).toEqual({
+      success: false,
+      errorCode: "INVALID_REQUEST",
+      error: "Please provide a valid appId.",
+    });
+  });
+
+  it("returns app keyword position history points", async () => {
+    mockListAppKeywordPositionHistory.mockReturnValue([
       {
+        appId: "app-2",
         keyword: "term",
-        normalizedKeyword: "term",
         country: "US",
-        popularity: 42,
-        difficultyScore: 67,
-        appCount: 10,
-        orderedAppIds: ["app-1"],
+        position: 11,
+        capturedAt: "2026-04-10T00:00:00.000Z",
       },
-    ] as any);
-    mockListAllAppKeywords.mockReturnValue([
       {
-        appId: "app-1",
+        appId: "app-2",
         keyword: "term",
         country: "US",
-        previousPosition: 1,
+        position: 7,
+        capturedAt: "2026-04-11T00:00:00.000Z",
       },
-    ] as any);
+    ]);
 
     const response = await request({
       method: "GET",
-      path: "/api/aso/keywords?country=US&appId=app-1",
+      path: "/api/aso/keywords/history?country=US&appId=app-2&keyword=term",
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json?.data).toEqual([
-      expect.objectContaining({
-        keyword: "term",
-        difficultyScore: null,
-        keywordStatus: "ok",
-      }),
-    ]);
+    expect(mockListAppKeywordPositionHistory).toHaveBeenCalledWith(
+      "app-2",
+      "term",
+      "US"
+    );
+    expect(response.json?.data).toEqual({
+      appId: "app-2",
+      keyword: "term",
+      points: [
+        {
+          capturedAt: "2026-04-10T00:00:00.000Z",
+          position: 11,
+        },
+        {
+          capturedAt: "2026-04-11T00:00:00.000Z",
+          position: 7,
+        },
+      ],
+    });
+  });
+
+  it("validates history request query params", async () => {
+    const response = await request({
+      method: "GET",
+      path: "/api/aso/keywords/history?country=US&appId=app-2",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json).toEqual({
+      success: false,
+      errorCode: "INVALID_REQUEST",
+      error: "Please provide appId and keyword.",
+    });
   });
 
   it("handles top-apps validation and hydration", async () => {
@@ -749,27 +881,74 @@ describe("dashboard server routes", () => {
     expect(mockUpsertCompetitorAppDocs).toHaveBeenCalled();
   });
 
-  it("returns PLAN_REQUIRED for top-apps when entitlement is missing", async () => {
-    mockIsTopAppsEntitled.mockResolvedValue({
-      allowed: false,
-      code: "PLAN_REQUIRED",
-      feature: "top_apps",
-      message: "Top apps requires an active plan.",
-      upgradeUrl: "https://paywall.example/upgrade",
-    });
+  it("refreshes stale top-app keyword order before reading app docs", async () => {
+    mockGetKeyword
+      .mockReturnValueOnce({
+        keyword: "term",
+        orderExpiresAt: "2000-01-01T00:00:00.000Z",
+        orderedAppIds: ["old1"],
+      } as any)
+      .mockReturnValue({
+        keyword: "term",
+        orderExpiresAt: "2099-01-01T00:00:00.000Z",
+        orderedAppIds: ["a1", "a2"],
+      } as any);
+    mockGetCompetitorAppDocs.mockReturnValue([
+      {
+        appId: "a1",
+        name: "Fresh A1",
+        averageUserRating: 4.6,
+        userRatingCount: 220,
+        releaseDate: "2024-01-01",
+        currentVersionReleaseDate: "2026-01-01",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      },
+      {
+        appId: "a2",
+        name: "Fresh A2",
+        averageUserRating: 4.1,
+        userRatingCount: 110,
+        releaseDate: "2024-02-01",
+        currentVersionReleaseDate: "2026-02-01",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      },
+    ] as any);
 
     const response = await request({
       method: "GET",
       path: "/api/aso/top-apps?country=US&keyword=term&limit=2",
     });
 
-    expect(response.statusCode).toBe(402);
-    expect(response.json).toEqual({
-      success: false,
-      errorCode: "PLAN_REQUIRED",
-      error: "Top apps requires an active plan. Upgrade: https://paywall.example/upgrade",
+    expect(response.statusCode).toBe(200);
+    expect(mockRefreshOrder).toHaveBeenCalledWith("US", ["term"]);
+    expect(mockGetCompetitorAppDocs).toHaveBeenCalledWith("US", ["a1", "a2"]);
+  });
+
+  it("does not refresh top-app keyword order when order TTL is fresh", async () => {
+    mockGetKeyword.mockReturnValue({
+      keyword: "term",
+      orderExpiresAt: "2099-01-01T00:00:00.000Z",
+      orderedAppIds: ["a1"],
+    } as any);
+    mockGetCompetitorAppDocs.mockReturnValue([
+      {
+        appId: "a1",
+        name: "Fresh A1",
+        averageUserRating: 4.6,
+        userRatingCount: 220,
+        releaseDate: "2024-01-01",
+        currentVersionReleaseDate: "2026-01-01",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      },
+    ] as any);
+
+    const response = await request({
+      method: "GET",
+      path: "/api/aso/top-apps?country=US&keyword=term&limit=1",
     });
-    expect(mockGetKeyword).not.toHaveBeenCalled();
+
+    expect(response.statusCode).toBe(200);
+    expect(mockRefreshOrder).not.toHaveBeenCalled();
   });
 
   it("handles percent-containing top-app keywords without throwing", async () => {
@@ -996,6 +1175,36 @@ describe("dashboard server routes", () => {
       success: true,
       data: { removedCount: 2 },
     });
+  });
+
+  it("updates favorite status for a keyword association", async () => {
+    mockSetAppKeywordFavorite.mockReturnValue(true);
+    const response = await request({
+      method: "POST",
+      path: "/api/aso/keywords/favorite",
+      body: {
+        appId: "app-1",
+        country: "US",
+        keyword: "term",
+        isFavorite: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json).toEqual({
+      success: true,
+      data: {
+        appId: "app-1",
+        keyword: "term",
+        isFavorite: true,
+      },
+    });
+    expect(mockSetAppKeywordFavorite).toHaveBeenCalledWith(
+      "app-1",
+      "term",
+      true,
+      "US"
+    );
   });
 
   it("falls back to cached competitor app docs when hydration fails", async () => {

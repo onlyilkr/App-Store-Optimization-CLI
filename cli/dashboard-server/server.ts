@@ -47,7 +47,6 @@ import {
 } from "./apps-handler";
 import { fetchOwnedAppSnapshotsFromApi } from "./owned-app-details";
 import { ASO_ENV } from "../shared/aso-env";
-import { asoBackendClient } from "../services/backend/aso-backend-client";
 
 const DEFAULT_PORT = 3456;
 const DEFAULT_APP_DOCS_HYDRATION_COUNTRY = DEFAULT_ASO_COUNTRY;
@@ -127,14 +126,14 @@ const startupRefreshManager = createStartupRefreshManager({
   country: DEFAULT_ASO_COUNTRY,
   listKeywords,
   listAppKeywords: listAllAppKeywords,
-  listOwnedAppIds: () =>
+  listAssociatedAppIds: () =>
     new Set([
       ...listOwnedAppIdsByKind("owned"),
       ...listOwnedAppIdsByKind("research"),
     ]),
+  listOrderRelevantAppIds: () => new Set(listOwnedAppIdsByKind("owned")),
   enrichKeywords: (country, items) =>
     keywordPipelineService.refreshStartup(country, items),
-  isDifficultyEntitled: () => asoBackendClient.isDifficultyEntitled(),
   isForegroundBusy: () => foregroundMutationCount > 0,
   reportError: (error, metadata) => {
     reportDashboardError(error, {
@@ -360,7 +359,12 @@ export function createServerRequestHandler(): http.RequestListener {
       }
 
       if (req.method === "GET" && pathname === "/api/aso/keywords") {
-        await asoRouteHandlers.handleApiAsoKeywordsGet(res, query);
+        asoRouteHandlers.handleApiAsoKeywordsGet(res, query);
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/api/aso/keywords/history") {
+        asoRouteHandlers.handleApiAsoKeywordHistoryGet(res, query);
         return;
       }
 
@@ -377,6 +381,13 @@ export function createServerRequestHandler(): http.RequestListener {
       if (req.method === "POST" && pathname === "/api/aso/keywords") {
         await runAsForegroundMutation(() =>
           asoRouteHandlers.handleApiAsoKeywordsPost(req, res)
+        );
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/api/aso/keywords/favorite") {
+        await runAsForegroundMutation(() =>
+          asoRouteHandlers.handleApiAsoKeywordsFavoritePost(req, res)
         );
         return;
       }

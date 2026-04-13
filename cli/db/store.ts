@@ -4,6 +4,19 @@ import Database from "better-sqlite3";
 import { ASO_ENV } from "../shared/aso-env";
 let db: Database.Database | null = null;
 
+function ensureAppKeywordFavoriteColumn(database: Database.Database): void {
+  const columns = database
+    .prepare(`PRAGMA table_info(app_keywords)`)
+    .all() as Array<{ name?: string }>;
+  const hasFavoriteColumn = columns.some((column) => column.name === "is_favorite");
+  if (!hasFavoriteColumn) {
+    database.exec(
+      `ALTER TABLE app_keywords
+       ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0`
+    );
+  }
+}
+
 function initializeDatabase(database: Database.Database): void {
   database.pragma("journal_mode = WAL");
   database.pragma("foreign_keys = ON");
@@ -40,13 +53,17 @@ function initializeDatabase(database: Database.Database): void {
       keyword TEXT NOT NULL,
       popularity REAL NOT NULL,
       difficulty_score REAL,
-      difficulty_state TEXT NOT NULL DEFAULT 'pending' CHECK (difficulty_state IN (
-        'pending',
-        'ready',
-        'failed',
-        'paywalled'
-      )),
+      min_difficulty_score REAL,
+      is_brand_keyword INTEGER,
       app_count INTEGER,
+      keyword_match TEXT CHECK (keyword_match IN (
+        'none',
+        'titleExactPhrase',
+        'titleAllWords',
+        'subtitleExactPhrase',
+        'combinedPhrase',
+        'subtitleAllWords'
+      )),
       ordered_app_ids TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -66,6 +83,7 @@ function initializeDatabase(database: Database.Database): void {
       user_rating_count INTEGER NOT NULL,
       release_date TEXT,
       current_version_release_date TEXT,
+      publisher_name TEXT,
       icon_json TEXT,
       icon_artwork_json TEXT,
       additional_localizations_json TEXT,
@@ -77,6 +95,7 @@ function initializeDatabase(database: Database.Database): void {
       app_id TEXT NOT NULL,
       keyword TEXT NOT NULL,
       country TEXT NOT NULL,
+      is_favorite INTEGER NOT NULL DEFAULT 0,
       previous_position INTEGER,
       added_at TEXT,
       PRIMARY KEY (app_id, keyword, country)
@@ -85,6 +104,16 @@ function initializeDatabase(database: Database.Database): void {
       ON app_keywords(country, app_id);
     CREATE INDEX IF NOT EXISTS idx_app_keywords_country_keyword
       ON app_keywords(country, keyword);
+    CREATE TABLE IF NOT EXISTS app_keyword_position_history (
+      app_id TEXT NOT NULL,
+      keyword TEXT NOT NULL,
+      country TEXT NOT NULL,
+      position INTEGER,
+      captured_at TEXT NOT NULL,
+      PRIMARY KEY (app_id, keyword, country, captured_at)
+    );
+    CREATE INDEX IF NOT EXISTS idx_app_keyword_position_history_lookup
+      ON app_keyword_position_history(country, app_id, keyword, captured_at);
 
     CREATE TABLE IF NOT EXISTS metadata (
       key TEXT PRIMARY KEY,
@@ -109,6 +138,11 @@ function initializeDatabase(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_aso_keyword_failures_country_stage
       ON aso_keyword_failures(country, stage);
+  `);
+  ensureAppKeywordFavoriteColumn(database);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_app_keywords_country_app_favorite
+      ON app_keywords(country, app_id, is_favorite);
   `);
 }
 

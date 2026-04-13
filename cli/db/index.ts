@@ -6,4 +6,5 @@ export * from "./aso-keywords";
 export * from "./aso-keyword-failures";
 export * from "./aso-apps";
 export * from "./app-keywords";
+export * from "./app-keyword-position-history";
 export * from "./metadata";

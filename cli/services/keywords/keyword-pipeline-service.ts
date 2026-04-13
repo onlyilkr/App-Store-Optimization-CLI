@@ -101,12 +101,11 @@ function isBelowMinPopularity(
 }
 
 function isAboveMaxDifficulty(
-  difficultyScore: number | null,
+  difficultyScore: number,
   filters?: KeywordFilterOptions
 ): boolean {
   return (
     filters?.maxDifficulty != null &&
-    difficultyScore != null &&
     Number.isFinite(difficultyScore) &&
     difficultyScore > filters.maxDifficulty
   );
@@ -205,8 +204,10 @@ function toAsoKeywordItem(
     country: item.country,
     popularity: item.popularity,
     difficultyScore: item.difficultyScore,
-    difficultyState: item.difficultyState,
+    minDifficultyScore: item.minDifficultyScore,
+    isBrandKeyword: item.isBrandKeyword,
     appCount: item.appCount,
+    keywordMatch: item.keywordMatch,
     orderedAppIds: item.orderedAppIds,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -400,7 +401,9 @@ export class KeywordPipelineService {
         keyword: item.keyword,
         reason: "low_popularity",
         popularity: item.popularity,
-        difficulty: item.difficultyScore ?? undefined,
+        difficulty: item.difficultyScore,
+        minDifficultyScore: item.minDifficultyScore,
+        isBrandKeyword: item.isBrandKeyword,
       });
       return false;
     });
@@ -445,6 +448,7 @@ export class KeywordPipelineService {
           keyword: item.keyword,
           reason: "low_popularity",
           popularity: item.popularity,
+          isBrandKeyword: null,
         });
         return false;
       });
@@ -469,6 +473,7 @@ export class KeywordPipelineService {
           keyword: item.keyword,
           reason: "low_popularity",
           popularity: item.popularity,
+          isBrandKeyword: null,
         });
         continue;
       }
@@ -500,6 +505,8 @@ export class KeywordPipelineService {
           reason: "low_popularity",
           popularity: existing.popularity,
           difficulty: existing.difficultyScore ?? undefined,
+          minDifficultyScore: existing.minDifficultyScore,
+          isBrandKeyword: existing.isBrandKeyword,
         });
         return false;
       }
@@ -615,8 +622,10 @@ export class KeywordPipelineService {
         country: existing.country,
         popularity: existing.popularity,
         difficultyScore: existing.difficultyScore,
-        difficultyState: existing.difficultyState,
+        minDifficultyScore: existing.minDifficultyScore,
+        isBrandKeyword: existing.isBrandKeyword,
         appCount: updatedOrder.appCount,
+        keywordMatch: existing.keywordMatch,
         orderedAppIds: updatedOrder.orderedAppIds,
         createdAt: existing.createdAt,
         updatedAt,
@@ -634,8 +643,10 @@ export class KeywordPipelineService {
           normalizedKeyword: item.normalizedKeyword,
           popularity: item.popularity,
           difficultyScore: item.difficultyScore,
-          difficultyState: item.difficultyState,
+          minDifficultyScore: item.minDifficultyScore,
+          isBrandKeyword: item.isBrandKeyword,
           appCount: item.appCount,
+          keywordMatch: item.keywordMatch,
           orderedAppIds: item.orderedAppIds,
           createdAt: item.createdAt,
           updatedAt: item.updatedAt,
@@ -695,7 +706,9 @@ export class KeywordPipelineService {
           keyword: item.keyword,
           reason: "high_difficulty",
           popularity: item.popularity,
-          difficulty: item.difficultyScore ?? undefined,
+          difficulty: item.difficultyScore,
+          minDifficultyScore: item.minDifficultyScore,
+          isBrandKeyword: item.isBrandKeyword,
         });
         return false;
       });

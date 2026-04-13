@@ -1,31 +1,16 @@
 import { jest } from "@jest/globals";
 import { enrichAsoKeywords } from "../keyword-cache-service";
 import { enrichKeyword } from "../services/aso-enrichment-service";
-import { asoBackendClient } from "../../backend/aso-backend-client";
 
 jest.mock("../services/aso-enrichment-service", () => ({
   enrichKeyword: jest.fn(),
 }));
 
-jest.mock("../../backend/aso-backend-client", () => ({
-  asoBackendClient: {
-    scoreDifficulty: jest.fn(async () => ({
-      difficultyScore: 10,
-      difficultyState: "ready",
-    })),
-  },
-}));
-
 const mockEnrichKeyword = jest.mocked(enrichKeyword);
-const mockScoreDifficulty = jest.mocked(asoBackendClient.scoreDifficulty);
 
 describe("ASO routes", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockScoreDifficulty.mockResolvedValue({
-      difficultyScore: 10,
-      difficultyState: "ready",
-    });
     process.env.ASO_KEYWORD_ENRICHMENT_CONCURRENCY = "4";
   });
 
@@ -46,7 +31,10 @@ describe("ASO routes", () => {
         normalizedKeyword: keyword,
         popularity,
         difficultyScore: 10,
+        minDifficultyScore: 5,
+        isBrandKeyword: false,
         appCount: 20,
+        keywordMatch: "titleAllWords",
         orderedAppIds: [],
         appDocs: [
           {
@@ -112,7 +100,10 @@ describe("ASO routes", () => {
         normalizedKeyword: keyword,
         popularity,
         difficultyScore: 10,
+        minDifficultyScore: 5,
+        isBrandKeyword: false,
         appCount: 20,
+        keywordMatch: "titleAllWords",
         orderedAppIds: [],
         appDocs: [],
       };
@@ -160,7 +151,10 @@ describe("ASO routes", () => {
         normalizedKeyword: keyword,
         popularity,
         difficultyScore: 10,
+        minDifficultyScore: 5,
+        isBrandKeyword: false,
         appCount: 20,
+        keywordMatch: "titleAllWords",
         orderedAppIds: [],
         appDocs: [],
       };

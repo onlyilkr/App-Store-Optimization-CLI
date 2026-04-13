@@ -14,8 +14,10 @@ function buildKeyword(
     country: "US",
     popularity: 10,
     difficultyScore: 20,
-    difficultyState: "ready",
+    minDifficultyScore: 5,
+    isBrandKeyword: null,
     appCount: 10,
+    keywordMatch: "titleExactPhrase",
     orderedAppIds: ["app-1"],
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -32,6 +34,7 @@ function buildAssociation(
     appId: "app-1",
     keyword: "term",
     country: "US",
+    isFavorite: false,
     previousPosition: null,
     addedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
@@ -49,7 +52,7 @@ async function waitForManagerToFinish(
 }
 
 describe("startup-refresh-manager", () => {
-  it("selects stale or incomplete associated keywords (owned + research) with valid popularity", () => {
+  it("does not select research-only keywords for order-stale refresh", () => {
     const now = Date.parse("2026-03-07T00:00:00.000Z");
     const selected = selectKeywordRefreshCandidates({
       keywords: [
@@ -63,8 +66,9 @@ describe("startup-refresh-manager", () => {
           keyword: "difficulty-missing",
           normalizedKeyword: "difficulty-missing",
           difficultyScore: null,
-          difficultyState: "pending",
+          minDifficultyScore: null,
           appCount: null,
+          keywordMatch: null,
         }),
         buildKeyword({
           keyword: "popularity-stale",
@@ -72,10 +76,25 @@ describe("startup-refresh-manager", () => {
           popularityExpiresAt: "2026-03-06T00:00:00.000Z",
         }),
         buildKeyword({
-          keyword: "research-only",
-          normalizedKeyword: "research-only",
+          keyword: "research-order-stale",
+          normalizedKeyword: "research-order-stale",
           popularity: 30,
           orderExpiresAt: "2026-03-06T00:00:00.000Z",
+        }),
+        buildKeyword({
+          keyword: "research-popularity-stale",
+          normalizedKeyword: "research-popularity-stale",
+          popularity: 31,
+          popularityExpiresAt: "2026-03-06T00:00:00.000Z",
+        }),
+        buildKeyword({
+          keyword: "research-difficulty-missing",
+          normalizedKeyword: "research-difficulty-missing",
+          popularity: 32,
+          difficultyScore: null,
+          minDifficultyScore: null,
+          appCount: null,
+          keywordMatch: null,
         }),
         buildKeyword({
           keyword: "no-popularity",
@@ -88,10 +107,22 @@ describe("startup-refresh-manager", () => {
         buildAssociation({ appId: "app-1", keyword: "fresh" }),
         buildAssociation({ appId: "app-1", keyword: "difficulty-missing" }),
         buildAssociation({ appId: "app-1", keyword: "popularity-stale" }),
-        buildAssociation({ appId: "research:ideas", keyword: "research-only" }),
+        buildAssociation({
+          appId: "research:ideas",
+          keyword: "research-order-stale",
+        }),
+        buildAssociation({
+          appId: "research:ideas",
+          keyword: "research-popularity-stale",
+        }),
+        buildAssociation({
+          appId: "research:ideas",
+          keyword: "research-difficulty-missing",
+        }),
         buildAssociation({ appId: "app-1", keyword: "no-popularity" }),
       ],
-      ownedAppIds: new Set(["app-1", "research:ideas"]),
+      associatedAppIds: new Set(["app-1", "research:ideas"]),
+      orderRelevantAppIds: new Set(["app-1"]),
       nowMs: now,
     });
 
@@ -99,55 +130,8 @@ describe("startup-refresh-manager", () => {
       { keyword: "order-stale", popularity: 10 },
       { keyword: "difficulty-missing", popularity: 10 },
       { keyword: "popularity-stale", popularity: 10 },
-      { keyword: "research-only", popularity: 30 },
-    ]);
-  });
-
-  it("skips paywalled missing-difficulty rows when difficulty entitlement is unavailable", () => {
-    const now = Date.parse("2026-03-07T00:00:00.000Z");
-    const keywords = [
-      buildKeyword({
-        keyword: "paywalled-missing",
-        normalizedKeyword: "paywalled-missing",
-        difficultyScore: null,
-        difficultyState: "paywalled",
-        appCount: null,
-      }),
-      buildKeyword({
-        keyword: "pending-missing",
-        normalizedKeyword: "pending-missing",
-        difficultyScore: null,
-        difficultyState: "pending",
-        appCount: null,
-      }),
-    ];
-    const appKeywords = [
-      buildAssociation({ appId: "app-1", keyword: "paywalled-missing" }),
-      buildAssociation({ appId: "app-1", keyword: "pending-missing" }),
-    ];
-    const ownedAppIds = new Set(["app-1"]);
-
-    const selectedWhenNotEntitled = selectKeywordRefreshCandidates({
-      keywords,
-      appKeywords,
-      ownedAppIds,
-      nowMs: now,
-      difficultyEntitled: false,
-    });
-    const selectedWhenEntitled = selectKeywordRefreshCandidates({
-      keywords,
-      appKeywords,
-      ownedAppIds,
-      nowMs: now,
-      difficultyEntitled: true,
-    });
-
-    expect(selectedWhenNotEntitled).toEqual([
-      { keyword: "pending-missing", popularity: 10 },
-    ]);
-    expect(selectedWhenEntitled).toEqual([
-      { keyword: "paywalled-missing", popularity: 10 },
-      { keyword: "pending-missing", popularity: 10 },
+      { keyword: "research-popularity-stale", popularity: 31 },
+      { keyword: "research-difficulty-missing", popularity: 32 },
     ]);
   });
 
@@ -180,7 +164,8 @@ describe("startup-refresh-manager", () => {
         buildAssociation({ keyword: "k2", appId: "app-1" }),
         buildAssociation({ keyword: "k3", appId: "app-1" }),
       ],
-      listOwnedAppIds: () => new Set(["app-1"]),
+      listAssociatedAppIds: () => new Set(["app-1"]),
+      listOrderRelevantAppIds: () => new Set(["app-1"]),
       enrichKeywords: async (_country, items) => {
         enrichCalls.push(items);
         if (enrichCalls.length === 1) {
@@ -222,7 +207,8 @@ describe("startup-refresh-manager", () => {
         }),
       ],
       listAppKeywords: () => [buildAssociation({ keyword: "k1", appId: "app-1" })],
-      listOwnedAppIds: () => new Set(["app-1"]),
+      listAssociatedAppIds: () => new Set(["app-1"]),
+      listOrderRelevantAppIds: () => new Set(["app-1"]),
       enrichKeywords: async () => {
         throw new Error("always fails");
       },
