@@ -33,6 +33,8 @@ import {
 import {
   createAsoRouteHandlers,
 } from "./routes/aso-routes";
+import { createProjectHandlers } from "./routes/project-handlers";
+import { resolveProjectId } from "./project-scope";
 import { sendApiError, sendJson, parseJsonBody } from "./http-utils";
 import {
   resolveStaticPath,
@@ -238,6 +240,13 @@ const asoRouteHandlers = createAsoRouteHandlers({
   isTruthyQueryParam,
 });
 
+const projectHandlers = createProjectHandlers({
+  parseJsonBody,
+  sendJson,
+  sendApiError,
+  reportDashboardError,
+});
+
 export function createServerRequestHandler(): http.RequestListener {
   return async (req, res) => {
     const url = req.url ?? "/";
@@ -255,6 +264,50 @@ export function createServerRequestHandler(): http.RequestListener {
         return;
       }
 
+      if (req.method === "GET" && pathname === "/api/projects") {
+        projectHandlers.handleProjectsGet(res);
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/api/projects") {
+        await runAsForegroundMutation(() =>
+          projectHandlers.handleProjectsPost(req, res)
+        );
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/api/projects/current") {
+        projectHandlers.handleCurrentProjectGet(res);
+        return;
+      }
+
+      if (req.method === "PUT" && pathname === "/api/projects/current") {
+        await runAsForegroundMutation(() =>
+          projectHandlers.handleCurrentProjectPut(req, res)
+        );
+        return;
+      }
+
+      if (
+        pathname.startsWith("/api/projects/") &&
+        pathname !== "/api/projects/current"
+      ) {
+        const projectId = pathname.slice("/api/projects/".length);
+        if (req.method === "PATCH") {
+          await runAsForegroundMutation(() =>
+            projectHandlers.handleProjectPatch(req, res, projectId)
+          );
+          return;
+        }
+        if (req.method === "DELETE") {
+          await runAsForegroundMutation(() => {
+            projectHandlers.handleProjectDelete(res, projectId);
+            return Promise.resolve();
+          });
+          return;
+        }
+      }
+
       if (req.method === "GET" && pathname === DASHBOARD_RUNTIME_CONFIG_PATH) {
         sendDashboardRuntimeConfig(
           res,
@@ -266,8 +319,10 @@ export function createServerRequestHandler(): http.RequestListener {
       }
 
       if (req.method === "GET" && pathname === "/api/apps") {
-        ensureDefaultResearchAppExists();
-        let apps = listOwnedApps(DEFAULT_APP_DOCS_HYDRATION_COUNTRY);
+        const projectId = resolveProjectId(query, res, sendApiError);
+        if (!projectId) return;
+        ensureDefaultResearchAppExists(projectId);
+        let apps = listOwnedApps(DEFAULT_APP_DOCS_HYDRATION_COUNTRY, projectId);
         const nowMs = Date.now();
         const refreshMaxAgeMs = ASO_ENV.ownedAppDocRefreshMaxAgeMs;
         const staleOwnedAppIds = apps
@@ -290,7 +345,7 @@ export function createServerRequestHandler(): http.RequestListener {
             if (snapshots.length > 0) {
               upsertOwnedAppSnapshots(DEFAULT_APP_DOCS_HYDRATION_COUNTRY, snapshots);
             }
-            apps = listOwnedApps(DEFAULT_APP_DOCS_HYDRATION_COUNTRY);
+            apps = listOwnedApps(DEFAULT_APP_DOCS_HYDRATION_COUNTRY, projectId);
           } catch (error) {
             reportDashboardError(error, {
               method: "GET",
@@ -328,8 +383,10 @@ export function createServerRequestHandler(): http.RequestListener {
       }
 
       if (req.method === "POST" && pathname === "/api/apps") {
+        const projectId = resolveProjectId(query, res, sendApiError);
+        if (!projectId) return;
         await runAsForegroundMutation(() =>
-          appsHandlers.handleApiAppsPost(req, res)
+          appsHandlers.handleApiAppsPost(req, res, projectId)
         );
         return;
       }
@@ -337,6 +394,18 @@ export function createServerRequestHandler(): http.RequestListener {
       if (req.method === "DELETE" && pathname === "/api/apps") {
         await runAsForegroundMutation(() =>
           appsHandlers.handleApiAppsDelete(req, res)
+        );
+        return;
+      }
+
+      if (
+        req.method === "PATCH" &&
+        pathname.startsWith("/api/apps/") &&
+        pathname !== "/api/apps/"
+      ) {
+        const appId = pathname.slice("/api/apps/".length);
+        await runAsForegroundMutation(() =>
+          appsHandlers.handleApiAppPatch(req, res, appId)
         );
         return;
       }

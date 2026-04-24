@@ -357,7 +357,12 @@ describe("dashboard server routes", () => {
 
     expect(response.statusCode).toBe(200);
     expect(mockUpsertOwnedApps).toHaveBeenCalledWith([
-      { id: DEFAULT_RESEARCH_APP_ID, kind: "research", name: "Research" },
+      {
+        id: "research:default",
+        kind: "research",
+        name: "Research",
+        projectId: "default",
+      },
     ]);
     expect(response.json?.data.map((item: any) => item.id)).toEqual(["2", "1"]);
   });
@@ -450,7 +455,7 @@ describe("dashboard server routes", () => {
 
   it("creates research app with slug collision suffix", async () => {
     mockGetOwnedAppById.mockImplementation((id: string) => {
-      if (id === DEFAULT_RESEARCH_APP_ID) return { id, name: "Research" } as any;
+      if (id === "research:default") return { id, name: "Research" } as any;
       if (id === "research:my-ideas") return { id, name: "My Ideas" } as any;
       return null;
     });
@@ -470,7 +475,12 @@ describe("dashboard server routes", () => {
       },
     });
     expect(mockUpsertOwnedApps).toHaveBeenCalledWith([
-      { id: "research:my-ideas-2", kind: "research", name: "My Ideas" },
+      {
+        id: "research:my-ideas-2",
+        kind: "research",
+        name: "My Ideas",
+        projectId: "default",
+      },
     ]);
   });
 
@@ -500,7 +510,7 @@ describe("dashboard server routes", () => {
       },
     });
     expect(mockUpsertOwnedApps).toHaveBeenCalledWith([
-      { id: "123", kind: "owned", name: "123" },
+      { id: "123", kind: "owned", name: "123", projectId: "default" },
     ]);
     expect(mockUpsertOwnedAppSnapshots).toHaveBeenCalledWith("US", [
       {
@@ -509,6 +519,7 @@ describe("dashboard server routes", () => {
         averageUserRating: 4.4,
         userRatingCount: 100,
         expiresAt: "2099-01-01T00:00:00.000Z",
+        projectId: "default",
       },
     ]);
   });
