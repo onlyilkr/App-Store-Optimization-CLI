@@ -1,4 +1,7 @@
+import type { AsoInteractivePrompt, AsoInteractivePromptResponse } from "../shared/aso-interactive-prompts";
+import type { AsoPromptHandler } from "../services/prompts/aso-prompt-handler";
 import { logger } from "../utils/logger";
+import { createDashboardPromptSession } from "./prompt-session";
 
 export type DashboardAuthStatus = "idle" | "in_progress" | "failed" | "succeeded";
 
@@ -8,10 +11,14 @@ export type DashboardAuthState = {
   lastError: string | null;
   requiresTerminalAction: boolean;
   canPrompt: boolean;
+  pendingPrompt: AsoInteractivePrompt | null;
 };
 
 type CreateDashboardAuthStateParams = {
-  reAuthenticate: (options?: { onUserActionRequired?: () => void }) => Promise<unknown>;
+  reAuthenticate: (options?: {
+    onUserActionRequired?: () => void;
+    promptHandler?: AsoPromptHandler;
+  }) => Promise<unknown>;
   onError: (error: unknown) => void;
 };
 
@@ -19,19 +26,16 @@ function nowIsoString(): string {
   return new Date().toISOString();
 }
 
-function hasInteractiveTerminal(): boolean {
-  return process.stdin.isTTY === true && process.stdout.isTTY === true;
-}
-
 export function createDashboardAuthStateManager(
   params: CreateDashboardAuthStateParams
 ) {
-  const state: Omit<DashboardAuthState, "canPrompt"> = {
+  const state: Omit<DashboardAuthState, "canPrompt" | "pendingPrompt"> = {
     status: "idle",
     updatedAt: null,
     lastError: null,
     requiresTerminalAction: false,
   };
+  const promptSession = createDashboardPromptSession();
 
   let inFlight: Promise<void> | null = null;
 
@@ -45,9 +49,8 @@ export function createDashboardAuthStateManager(
     state.requiresTerminalAction = false;
   };
 
-  const markNeedsTerminalAction = (): void => {
+  const markPrompted = (): void => {
     if (state.status !== "in_progress") return;
-    state.requiresTerminalAction = true;
     state.updatedAt = nowIsoString();
   };
 
@@ -58,7 +61,8 @@ export function createDashboardAuthStateManager(
         updatedAt: state.updatedAt,
         lastError: state.lastError,
         requiresTerminalAction: state.requiresTerminalAction,
-        canPrompt: hasInteractiveTerminal(),
+        canPrompt: true,
+        pendingPrompt: promptSession.getPendingPrompt(),
       };
     },
 
@@ -66,24 +70,33 @@ export function createDashboardAuthStateManager(
       return inFlight != null;
     },
 
-    canPrompt(): boolean {
-      return hasInteractiveTerminal();
+    submitPromptResponse(response: AsoInteractivePromptResponse): boolean {
+      if (state.status !== "in_progress") return false;
+      const accepted = promptSession.submitPromptResponse(response);
+      if (accepted) {
+        state.updatedAt = nowIsoString();
+      }
+      return accepted;
     },
 
     start(): boolean {
       if (inFlight) return false;
 
       setState("in_progress", null);
+      promptSession.reset();
       inFlight = params
         .reAuthenticate({
           onUserActionRequired: () => {
-            markNeedsTerminalAction();
+            markPrompted();
           },
+          promptHandler: promptSession.createPromptHandler(),
         })
         .then(() => {
+          promptSession.reset();
           setState("succeeded", null);
         })
         .catch((error) => {
+          promptSession.failPendingPrompt(error);
           const message = error instanceof Error ? error.message : String(error);
           setState("failed", message || "Authentication failed.");
           params.onError(error);

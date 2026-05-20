@@ -1,6 +1,6 @@
 {
   "name": "aso-cli",
-  "version": "0.8.0",
+  "version": "0.11.0",
   "description": "Local App Store Optimization CLI",
   "main": "cli/dist/cli.js",
   "bin": {
@@ -20,6 +20,9 @@
     "watch": "npm run build:watch",
     "dashboard:build": "vite build --config cli/dashboard-ui/vite.config.ts",
     "dashboard:watch": "vite build --watch --config cli/dashboard-ui/vite.config.ts",
+    "website:dev": "npm run --prefix website dev:watch",
+    "website:build": "npm run --prefix website build",
+    "website:preview": "npm run --prefix website preview -- --host localhost --port 4321",
     "dev": "concurrently -k -n watch,app \"npm:watch\" \"npm:start:dev\"",
     "clean": "rm -rf cli/dist",
     "nuke": "rm -rf node_modules cli/dist package-lock.json",
@@ -57,7 +60,7 @@
   ],
   "license": "MIT",
   "engines": {
-    "node": ">=20.18.1",
+    "node": ">=18.14.1",
     "npm": ">=8.0.0"
   },
   "homepage": "https://github.com/semihcihan/App-Store-Optimization-CLI",
@@ -75,6 +78,7 @@
     "dotenv": "^16.6.1",
     "inquirer": "^8.2.5",
     "ora": "^8.2.0",
+    "posthog-node": "^5.30.4",
     "winston": "^3.17.0",
     "yargs": "^17.7.2",
     "zod": "4.1.9",

@@ -60,6 +60,7 @@ const EXPECTED_DASHBOARD_FLOW_ERROR_CODES = new Set([
   "AUTH_REQUIRED",
   "AUTH_IN_PROGRESS",
   "TTY_REQUIRED",
+  "PRIMARY_APP_ID_RECONFIGURE_REQUIRED",
   "AUTHORIZATION_FAILED",
   "NOT_FOUND",
 ]);
@@ -68,6 +69,7 @@ const APPLE_AUTH_USER_FAULT_REASONS = new Set([
   "invalid_credentials",
   "two_factor_required",
   "upgrade_required",
+  "verification_delivery_failed",
 ]);
 
 function getTelemetryHint(metadata: AnyRecord): TelemetryHint | undefined {
