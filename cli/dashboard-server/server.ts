@@ -53,7 +53,7 @@ import {
   ensureDefaultResearchAppExists,
 } from "./apps-handler";
 import { fetchOwnedAppSnapshotsFromApi } from "./owned-app-details";
-import { getProjectCountry } from "../db/projects";
+import { getProjectCountry, listDistinctProjectCountries } from "../db/projects";
 import { ASO_ENV } from "../shared/aso-env";
 import type {
   AsoInteractivePrompt,
@@ -133,34 +133,86 @@ function runAsForegroundMutationSync(operation: () => void): void {
   }
 }
 
-const startupRefreshManager = createStartupRefreshManager({
-  country: DEFAULT_ASO_COUNTRY,
-  listKeywords,
-  listAppKeywords: listAllAppKeywords,
-  listAssociatedAppIds: () =>
-    new Set([
-      ...listOwnedAppIdsByKind("owned"),
-      ...listOwnedAppIdsByKind("research"),
-    ]),
-  listOrderRelevantAppIds: () => new Set(listOwnedAppIdsByKind("owned")),
-  enrichKeywords: (country, items) =>
-    keywordPipelineService.refreshStartup(country, items),
-  isForegroundBusy: () => foregroundMutationCount > 0,
-  reportError: (error, metadata) => {
-    reportDashboardError(error, {
-      ...metadata,
-      context: "startup-refresh",
-    });
-  },
-  isAuthReauthRequiredError: isAsoAuthReauthRequiredError,
-});
+const startupRefreshManagers = new Map<
+  string,
+  ReturnType<typeof createStartupRefreshManager>
+>();
 
-function getStartupRefreshState(): StartupRefreshState {
-  return startupRefreshManager.getState();
+function getOrCreateRefreshManager(country: string) {
+  const existing = startupRefreshManagers.get(country);
+  if (existing) return existing;
+  const manager = createStartupRefreshManager({
+    country,
+    listKeywords,
+    listAppKeywords: listAllAppKeywords,
+    listAssociatedAppIds: () =>
+      new Set([
+        ...listOwnedAppIdsByKind("owned"),
+        ...listOwnedAppIdsByKind("research"),
+      ]),
+    listOrderRelevantAppIds: () => new Set(listOwnedAppIdsByKind("owned")),
+    enrichKeywords: (countryArg, items) =>
+      keywordPipelineService.refreshStartup(countryArg, items),
+    isForegroundBusy: () => foregroundMutationCount > 0,
+    reportError: (error, metadata) => {
+      reportDashboardError(error, {
+        ...metadata,
+        context: "startup-refresh",
+        country,
+      });
+    },
+    isAuthReauthRequiredError: isAsoAuthReauthRequiredError,
+  });
+  startupRefreshManagers.set(country, manager);
+  return manager;
 }
 
-function startStartupRefresh(): void {
-  startupRefreshManager.start();
+function startStartupRefreshForAllProjects(): void {
+  for (const country of listDistinctProjectCountries()) {
+    getOrCreateRefreshManager(country).start();
+  }
+}
+
+type StartupRefreshStateByCountry = StartupRefreshState & { country: string };
+
+function collectStartupRefreshStates(): StartupRefreshStateByCountry[] {
+  return [...startupRefreshManagers.entries()].map(([country, manager]) => ({
+    country,
+    ...manager.getState(),
+  }));
+}
+
+function getPrimaryStartupRefreshState(): StartupRefreshState {
+  const states = collectStartupRefreshStates();
+  const us = states.find((s) => s.country === DEFAULT_ASO_COUNTRY);
+  const fallback = states[0];
+  const primary = us ?? fallback;
+  if (primary) {
+    // Strip the country field so the legacy shape is preserved.
+    const { country: _country, ...rest } = primary;
+    return rest;
+  }
+  return {
+    status: "idle",
+    startedAt: null,
+    finishedAt: null,
+    lastError: null,
+    requiresReauthentication: false,
+    counters: {
+      eligibleKeywordCount: 0,
+      refreshedKeywordCount: 0,
+      failedKeywordCount: 0,
+    },
+  };
+}
+
+function getRefreshStateForResponse(): StartupRefreshState & {
+  byCountry: StartupRefreshStateByCountry[];
+} {
+  return {
+    ...getPrimaryStartupRefreshState(),
+    byCountry: collectStartupRefreshStates(),
+  };
 }
 
 const dashboardAuthStateManager = createDashboardAuthStateManager({
@@ -182,7 +234,7 @@ const dashboardSetupStateManager = createDashboardSetupStateManager({
       promptHandler: options?.promptHandler,
     }),
   onResolved: () => {
-    startStartupRefresh();
+    startStartupRefreshForAllProjects();
   },
   onError: (error) => {
     reportDashboardError(error, {
@@ -299,12 +351,12 @@ function handleApiAsoSetupStatusGet(res: http.ServerResponse): void {
 }
 
 function handleApiAsoRefreshStatusGet(res: http.ServerResponse): void {
-  sendJson(res, 200, { success: true, data: getStartupRefreshState() });
+  sendJson(res, 200, { success: true, data: getRefreshStateForResponse() });
 }
 
 function handleApiAsoRefreshStartPost(res: http.ServerResponse): void {
-  startStartupRefresh();
-  sendJson(res, 202, { success: true, data: getStartupRefreshState() });
+  startStartupRefreshForAllProjects();
+  sendJson(res, 202, { success: true, data: getRefreshStateForResponse() });
 }
 
 function handleApiAsoAuthStartPost(res: http.ServerResponse): void {
@@ -780,7 +832,7 @@ export function startDashboard(openBrowser: boolean = true): Promise<never> {
       const url = `http://127.0.0.1:${activePort}`;
       logger.info(`ASO Dashboard: ${url}`);
       if (getConfiguredAsoAdamId()) {
-        startupRefreshManager.start();
+        startStartupRefreshForAllProjects();
       } else {
         dashboardSetupStateManager.start();
       }

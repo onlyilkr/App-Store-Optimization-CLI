@@ -5,6 +5,7 @@ import { getDb, resetDbForTests } from "./store";
 import {
   createProject,
   getProjectById,
+  listDistinctProjectCountries,
   listProjectSummaries,
   updateProject,
 } from "./projects";
@@ -78,6 +79,16 @@ describe("projects CRUD with country", () => {
       const summaries = listProjectSummaries();
       const fr = summaries.find((s) => s.name === "X-FR");
       expect(fr?.country).toBe("FR");
+    });
+  });
+
+  it("listDistinctProjectCountries returns unique set", () => {
+    withTempDb(() => {
+      createProject({ name: "A", country: "TR" });
+      createProject({ name: "B", country: "TR" });
+      createProject({ name: "C", country: "DE" });
+      const result = listDistinctProjectCountries();
+      expect([...result].sort()).toEqual(["DE", "TR", "US"]);
     });
   });
 });

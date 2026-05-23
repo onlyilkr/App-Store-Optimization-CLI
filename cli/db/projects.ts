@@ -302,3 +302,15 @@ export function getProjectCountry(id: string): ProjectCountry {
   const project = getProjectById(id);
   return project?.country ?? DEFAULT_PROJECT_COUNTRY;
 }
+
+export function listDistinctProjectCountries(): ProjectCountry[] {
+  const db = getDb();
+  const rows = db
+    .prepare(`SELECT DISTINCT country FROM projects`)
+    .all() as Array<{ country: string }>;
+  const seen = new Set<ProjectCountry>();
+  for (const row of rows) {
+    seen.add(normalizeCountryForStorage(row.country));
+  }
+  return Array.from(seen);
+}

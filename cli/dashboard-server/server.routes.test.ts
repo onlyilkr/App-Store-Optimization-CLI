@@ -28,7 +28,11 @@ import {
   refreshAsoKeywordOrderLocal,
 } from "../services/keywords/aso-local-cache-service";
 import { getDb } from "../db/store";
-import { getProjectById, getProjectCountry } from "../db/projects";
+import {
+  getProjectById,
+  getProjectCountry,
+  listDistinctProjectCountries,
+} from "../db/projects";
 import { asoAuthService } from "../services/auth/aso-auth-service";
 import { keywordPipelineService } from "../services/keywords/keyword-pipeline-service";
 import { isAsoAuthReauthRequiredError } from "../services/keywords/aso-popularity-service";
@@ -149,6 +153,7 @@ jest.mock("./owned-app-details", () => ({
 jest.mock("../db/projects", () => ({
   getProjectById: jest.fn(() => null),
   getProjectCountry: jest.fn(() => "US"),
+  listDistinctProjectCountries: jest.fn(() => ["US"]),
 }));
 
 jest.mock("../db/metadata", () => ({
@@ -270,6 +275,9 @@ describe("dashboard server routes", () => {
   const mockFetchOwnedAppSnapshotsFromApi = jest.mocked(fetchOwnedAppSnapshotsFromApi);
   const mockGetProjectById = jest.mocked(getProjectById);
   const mockGetProjectCountry = jest.mocked(getProjectCountry);
+  const mockListDistinctProjectCountries = jest.mocked(
+    listDistinctProjectCountries
+  );
   const mockGetAsoAppDocsLocal = jest.mocked(getAsoAppDocsLocal);
   const mockRefreshAsoKeywordOrderLocal = jest.mocked(refreshAsoKeywordOrderLocal);
   const mockReAuthenticate = jest.mocked(asoAuthService.reAuthenticate);
@@ -304,6 +312,7 @@ describe("dashboard server routes", () => {
     mockFetchOwnedAppSnapshotsFromApi.mockResolvedValue([]);
     mockGetProjectById.mockReturnValue(null);
     mockGetProjectCountry.mockReturnValue("US" as any);
+    mockListDistinctProjectCountries.mockReturnValue(["US"] as any);
     mockUpsertOwnedAppSnapshots.mockImplementation(() => {});
     mockGetAsoAppDocsLocal.mockResolvedValue([]);
     mockRefreshAsoKeywordOrderLocal.mockResolvedValue({
@@ -357,6 +366,7 @@ describe("dashboard server routes", () => {
     expect(response.json?.data).toEqual(
       expect.objectContaining({
         status: expect.any(String),
+        byCountry: expect.any(Array),
       })
     );
   });
@@ -372,8 +382,33 @@ describe("dashboard server routes", () => {
     expect(response.json?.data).toEqual(
       expect.objectContaining({
         status: expect.any(String),
+        byCountry: expect.any(Array),
       })
     );
+  });
+
+  it("fans out refresh status across distinct project countries", async () => {
+    mockListDistinctProjectCountries.mockReturnValue(["US", "TR"] as any);
+
+    const startResponse = await request({
+      method: "POST",
+      path: "/api/aso/refresh/start",
+    });
+    expect(startResponse.statusCode).toBe(202);
+    const startCountries = (startResponse.json?.data?.byCountry ?? []).map(
+      (s: { country: string }) => s.country
+    );
+    expect(new Set(startCountries)).toEqual(new Set(["US", "TR"]));
+
+    const statusResponse = await request({
+      method: "GET",
+      path: "/api/aso/refresh-status",
+    });
+    expect(statusResponse.statusCode).toBe(200);
+    const statusCountries = (statusResponse.json?.data?.byCountry ?? []).map(
+      (s: { country: string }) => s.country
+    );
+    expect(new Set(statusCountries)).toEqual(new Set(["US", "TR"]));
   });
 
   it("returns apps sorted and ensures default research app", async () => {
