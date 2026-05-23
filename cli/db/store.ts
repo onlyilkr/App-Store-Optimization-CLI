@@ -35,10 +35,23 @@ function ensureProjectsTable(database: Database.Database): void {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL UNIQUE COLLATE NOCASE,
       color TEXT NOT NULL DEFAULT '${DEFAULT_PROJECT_COLOR}',
+      country TEXT NOT NULL DEFAULT 'US',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
   `);
+}
+
+function ensureProjectsCountryColumn(database: Database.Database): void {
+  const columns = database
+    .prepare(`PRAGMA table_info(projects)`)
+    .all() as Array<{ name?: string }>;
+  const hasCountry = columns.some((c) => c.name === "country");
+  if (!hasCountry) {
+    database.exec(
+      `ALTER TABLE projects ADD COLUMN country TEXT NOT NULL DEFAULT 'US'`
+    );
+  }
 }
 
 function ensureDefaultProjectRow(database: Database.Database): void {
@@ -257,6 +270,7 @@ function initializeDatabase(database: Database.Database): void {
       ON aso_keyword_failures(country, stage);
   `);
   ensureProjectsTable(database);
+  ensureProjectsCountryColumn(database);
   ensureDefaultProjectRow(database);
   ensureProjectIdColumnOnOwnedApps(database);
   ensureOwnedAppsProjectIndexes(database);
@@ -290,4 +304,15 @@ export function closeDbForTests(): void {
   if (!db) return;
   db.close();
   db = null;
+}
+
+export function resetDbForTests(): void {
+  if (db) {
+    try {
+      db.close();
+    } catch {
+      // already closed
+    }
+    db = null;
+  }
 }
