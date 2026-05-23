@@ -6,11 +6,17 @@ import {
   PROJECT_NAME_MAX_LENGTH,
   type ProjectColor,
 } from "../../shared/project-types";
+import type { SupportedCountry } from "../../shared/aso-storefronts";
+import { CountrySelector } from "./CountrySelector";
 
 type ProjectCreateDialogProps = {
   open: boolean;
   onClose: () => void;
-  onSubmit: (input: { name: string; color: ProjectColor }) => Promise<void>;
+  onSubmit: (input: {
+    name: string;
+    color: ProjectColor;
+    country: SupportedCountry;
+  }) => Promise<void>;
 };
 
 export function ProjectCreateDialog({
@@ -20,6 +26,7 @@ export function ProjectCreateDialog({
 }: ProjectCreateDialogProps) {
   const [name, setName] = useState("");
   const [color, setColor] = useState<ProjectColor>("slate");
+  const [country, setCountry] = useState<SupportedCountry>("US");
   const [isBusy, setIsBusy] = useState(false);
   const [errorText, setErrorText] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -28,6 +35,7 @@ export function ProjectCreateDialog({
     if (open) {
       setName("");
       setColor("slate");
+      setCountry("US");
       setErrorText("");
       setIsBusy(false);
       const handle = window.setTimeout(() => inputRef.current?.focus(), 50);
@@ -47,7 +55,7 @@ export function ProjectCreateDialog({
     setIsBusy(true);
     setErrorText("");
     try {
-      await onSubmit({ name: trimmed, color });
+      await onSubmit({ name: trimmed, color, country });
       onClose();
     } catch (error) {
       setErrorText(
@@ -113,6 +121,15 @@ export function ProjectCreateDialog({
               />
             ))}
           </div>
+          <label className="project-dialog-label" htmlFor="project-country">
+            Country
+          </label>
+          <CountrySelector
+            id="project-country"
+            value={country}
+            onChange={setCountry}
+            disabled={isBusy}
+          />
           {errorText ? (
             <p className="project-dialog-error">{errorText}</p>
           ) : null}

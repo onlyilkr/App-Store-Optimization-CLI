@@ -2978,8 +2978,8 @@ export function App() {
       <ProjectCreateDialog
         open={projectCreateOpen}
         onClose={() => setProjectCreateOpen(false)}
-        onSubmit={async ({ name, color }) => {
-          await projectContext.createProject({ name, color });
+        onSubmit={async ({ name, color, country }) => {
+          await projectContext.createProject({ name, color, country });
         }}
       />
       <ProjectManageDialog

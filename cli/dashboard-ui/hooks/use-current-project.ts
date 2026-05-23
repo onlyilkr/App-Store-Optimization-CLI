@@ -11,6 +11,7 @@ import {
   type ProjectColor,
   type ProjectSummary,
 } from "../../shared/project-types";
+import type { SupportedCountry } from "../../shared/aso-storefronts";
 
 const CURRENT_PROJECT_STORAGE_KEY = "aso-current-project-id";
 
@@ -25,10 +26,11 @@ export type UseCurrentProjectResult = {
   createProject: (input: {
     name: string;
     color?: ProjectColor;
+    country?: SupportedCountry;
   }) => Promise<Project>;
   updateProject: (
     projectId: string,
-    patch: { name?: string; color?: ProjectColor }
+    patch: { name?: string; color?: ProjectColor; country?: SupportedCountry }
   ) => Promise<Project>;
   deleteProject: (
     projectId: string
@@ -121,7 +123,11 @@ export function useCurrentProject(): UseCurrentProjectResult {
   );
 
   const createProject = useCallback(
-    async (input: { name: string; color?: ProjectColor }) => {
+    async (input: {
+      name: string;
+      color?: ProjectColor;
+      country?: SupportedCountry;
+    }) => {
       const created = await apiWrite<Project>(
         "POST",
         "/api/projects",
@@ -137,7 +143,7 @@ export function useCurrentProject(): UseCurrentProjectResult {
   const updateProject = useCallback(
     async (
       projectId: string,
-      patch: { name?: string; color?: ProjectColor }
+      patch: { name?: string; color?: ProjectColor; country?: SupportedCountry }
     ) => {
       const updated = await apiWrite<Project>(
         "PATCH",
