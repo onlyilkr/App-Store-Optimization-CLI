@@ -15,19 +15,9 @@ import {
   ASO_MAX_KEYWORDS,
   ASO_MAX_KEYWORDS_PER_REQUEST_ERROR,
 } from "../../shared/aso-keyword-limits";
-import {
-  assertSupportedCountry,
-  normalizeCountry,
-  normalizeKeyword,
-} from "../../domain/keywords/policy";
-import { getProjectCountry } from "../../db/projects";
+import { normalizeKeyword } from "../../domain/keywords/policy";
 import type { AsoRouteDeps } from "./aso-route-types";
-
-function resolveCountryForProject(projectId: string): string {
-  const country = normalizeCountry(getProjectCountry(projectId));
-  assertSupportedCountry(country);
-  return country;
-}
+import { resolveCountryForProject } from "./country-resolver";
 
 const DEFAULT_KEYWORDS_PAGE = 1;
 const DEFAULT_KEYWORDS_PAGE_SIZE = 100;

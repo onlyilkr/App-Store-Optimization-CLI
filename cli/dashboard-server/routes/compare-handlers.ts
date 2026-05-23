@@ -3,17 +3,6 @@ import { logger } from "../../utils/logger";
 import { listUnionKeywords, getCompareMatrix } from "../../db/app-compare";
 import { getOwnedAppById } from "../../db/owned-apps";
 import {
-  assertSupportedCountry,
-  normalizeCountry,
-} from "../../domain/keywords/policy";
-import { getProjectCountry } from "../../db/projects";
-
-function resolveCountryForProject(projectId: string): string {
-  const country = normalizeCountry(getProjectCountry(projectId));
-  assertSupportedCountry(country);
-  return country;
-}
-import {
   COMPARE_MAX_APPS,
   COMPARE_MAX_KEYWORDS,
   COMPARE_MIN_APPS,
@@ -23,6 +12,7 @@ import {
   type CompareMatrixResponse,
 } from "../../shared/compare-types";
 import type { AsoRouteDeps } from "./aso-route-types";
+import { resolveCountryForProject } from "./country-resolver";
 
 function parseAppIdsQueryParam(raw: string | undefined): string[] {
   if (!raw) return [];

@@ -11,19 +11,11 @@ import {
 import { keywordPipelineService } from "../../services/keywords/keyword-pipeline-service";
 import { chunkArray, getMissingOrExpiredAppIds } from "../refresh-utils";
 import {
-  assertSupportedCountry,
   DEFAULT_ASO_COUNTRY,
-  normalizeCountry,
 } from "../../domain/keywords/policy";
-import { getProjectCountry } from "../../db/projects";
 import type { AsoApiAppDoc, AsoRouteDeps } from "./aso-route-types";
 import { isStoredKeywordOrderFresh } from "../../shared/aso-keyword-validity";
-
-function resolveCountryForProject(projectId: string): string {
-  const country = normalizeCountry(getProjectCountry(projectId));
-  assertSupportedCountry(country);
-  return country;
-}
+import { resolveCountryForProject } from "./country-resolver";
 
 const ASO_APP_DOCS_MAX_BATCH_SIZE = 50;
 const ASO_APP_SEARCH_DEFAULT_LIMIT = 20;
