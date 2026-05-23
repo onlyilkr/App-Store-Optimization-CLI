@@ -9,6 +9,7 @@ import {
   assertSupportedCountry,
   normalizeCountry,
 } from "../../../domain/keywords/policy";
+import { getStorefrontConfig } from "../../../shared/aso-storefronts";
 
 type AppStoreProductVersionHistoryItem = {
   releaseDate?: string;
@@ -45,13 +46,9 @@ type AppStoreProductLookupPayload = {
   };
 };
 
-const APP_STORE_FRONT_ID_BY_COUNTRY: Record<string, string> = {
-  US: "143441",
-};
-
 function getStoreFrontHeader(country: string): string {
-  const id = APP_STORE_FRONT_ID_BY_COUNTRY[country.toUpperCase()] ?? APP_STORE_FRONT_ID_BY_COUNTRY.US;
-  return `${id}-1,29`;
+  const config = getStorefrontConfig(country);
+  return `${config.storefrontId}-1,29`;
 }
 
 function parseAppStorePayload(raw: unknown): AppStoreProductLookupPayload | null {
@@ -461,3 +458,5 @@ export async function getAsoAppDocs(params: {
     .map((id) => resultById.get(id))
     .filter((doc): doc is AsoAppDoc => doc != null);
 }
+
+export const __testing__ = { getStoreFrontHeader };

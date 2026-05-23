@@ -373,3 +373,19 @@ describe("aso-app-doc-service", () => {
     expect(mockedAsoAppleGet).not.toHaveBeenCalled();
   });
 });
+
+import { __testing__ } from "./aso-app-doc-service";
+
+describe("aso-app-doc-service storefront resolution", () => {
+  it("returns TR storefront header when country=TR", () => {
+    expect(__testing__.getStoreFrontHeader("TR")).toBe("143480-1,29");
+  });
+
+  it("returns DE storefront header when country=DE", () => {
+    expect(__testing__.getStoreFrontHeader("DE")).toBe("143443-1,29");
+  });
+
+  it("rejects unsupported country", () => {
+    expect(() => __testing__.getStoreFrontHeader("ZZ")).toThrow(/Unsupported country/);
+  });
+});
