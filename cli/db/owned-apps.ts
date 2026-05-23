@@ -66,9 +66,12 @@ export function listOwnedApps(
   const db = getDb();
   const normalizedCountry = normalizeCountry(country);
   const params: unknown[] = [normalizedCountry];
+  let joinClause = "";
   let whereClause = "";
   if (projectId) {
-    whereClause = " WHERE app.project_id = ?";
+    joinClause =
+      " INNER JOIN owned_app_project_memberships m ON m.app_id = app.id";
+    whereClause = " WHERE m.project_id = ?";
     params.push(projectId);
   }
   const rows = db
@@ -80,7 +83,7 @@ export function listOwnedApps(
        FROM owned_apps app
        LEFT JOIN owned_app_country_ratings ratings
          ON ratings.app_id = app.id
-        AND ratings.country = ?${whereClause}
+        AND ratings.country = ?${joinClause}${whereClause}
        ORDER BY app.name COLLATE NOCASE ASC`
     )
     .all(...params) as OwnedAppRow[];
@@ -92,19 +95,24 @@ export function listOwnedAppIdsByKind(
   projectId?: string
 ): string[] {
   const db = getDb();
-  const params: unknown[] = [kind];
-  let whereClause = "";
   if (projectId) {
-    whereClause = " AND project_id = ?";
-    params.push(projectId);
+    const rows = db
+      .prepare(
+        `SELECT app.id
+         FROM owned_apps app
+         INNER JOIN owned_app_project_memberships m ON m.app_id = app.id
+         WHERE app.kind = ? AND m.project_id = ?`
+      )
+      .all(kind, projectId) as Array<{ id: string }>;
+    return rows.map((row) => row.id);
   }
   const rows = db
     .prepare(
       `SELECT id
        FROM owned_apps
-       WHERE kind = ?${whereClause}`
+       WHERE kind = ?`
     )
-    .all(...params) as Array<{ id: string }>;
+    .all(kind) as Array<{ id: string }>;
   return rows.map((row) => row.id);
 }
 
@@ -115,11 +123,13 @@ export function getOwnedAppById(
 ): StoredOwnedApp | null {
   const db = getDb();
   const normalizedCountry = normalizeCountry(country);
-  const params: unknown[] = [normalizedCountry, id];
-  let whereClause = "WHERE app.id = ?";
   if (projectId) {
-    whereClause += " AND app.project_id = ?";
-    params.push(projectId);
+    const membership = db
+      .prepare(
+        `SELECT 1 FROM owned_app_project_memberships WHERE app_id = ? AND project_id = ? LIMIT 1`
+      )
+      .get(id, projectId) as { 1?: number } | undefined;
+    if (!membership) return null;
   }
   const row = db
     .prepare(
@@ -131,9 +141,9 @@ export function getOwnedAppById(
        LEFT JOIN owned_app_country_ratings ratings
          ON ratings.app_id = app.id
         AND ratings.country = ?
-       ${whereClause}`
+       WHERE app.id = ?`
     )
-    .get(...params) as OwnedAppRow | undefined;
+    .get(normalizedCountry, id) as OwnedAppRow | undefined;
   return row ? toStoredOwnedApp(row) : null;
 }
 
@@ -145,15 +155,46 @@ export function getAppProjectId(id: string): string | null {
   return row?.project_id ?? null;
 }
 
-export function moveAppToProject(
-  id: string,
-  projectId: string
-): boolean {
+export function listAppProjectIds(id: string): string[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT project_id FROM owned_app_project_memberships WHERE app_id = ? ORDER BY added_at ASC`
+    )
+    .all(id) as Array<{ project_id: string }>;
+  return rows.map((row) => row.project_id);
+}
+
+export function addAppToProject(appId: string, projectId: string): boolean {
   const db = getDb();
   const result = db
-    .prepare(`UPDATE owned_apps SET project_id = ? WHERE id = ?`)
-    .run(projectId, id);
+    .prepare(
+      `INSERT OR IGNORE INTO owned_app_project_memberships (app_id, project_id, added_at)
+       VALUES (?, ?, ?)`
+    )
+    .run(appId, projectId, new Date().toISOString());
   return result.changes > 0;
+}
+
+export function removeAppFromProject(
+  appId: string,
+  projectId: string
+): { removed: boolean; remainingProjects: number } {
+  const db = getDb();
+  const result = db
+    .prepare(
+      `DELETE FROM owned_app_project_memberships WHERE app_id = ? AND project_id = ?`
+    )
+    .run(appId, projectId);
+  const remaining = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM owned_app_project_memberships WHERE app_id = ?`
+    )
+    .get(appId) as { n: number };
+  return {
+    removed: result.changes > 0,
+    remainingProjects: Number(remaining?.n ?? 0),
+  };
 }
 
 export function upsertOwnedApps(

@@ -72,7 +72,7 @@ const isSensitiveField = buildSensitiveKeyMatcher({
 
 type DashboardApiTrace = {
   timestamp: string;
-  method: "GET" | "POST" | "DELETE";
+  method: "GET" | "POST" | "DELETE" | "PUT" | "PATCH";
   path: string;
   durationMs: number;
   request: {
@@ -147,7 +147,7 @@ function getTelemetryDashboardApiTraces(): DashboardApiTrace[] {
 }
 
 function toDashboardApiOperation(
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "DELETE" | "PUT" | "PATCH",
   path: string
 ): string {
   const operationPath = path.split("?")[0] || path;
@@ -182,12 +182,35 @@ export function toActionableErrorMessage(
   return toDashboardActionableErrorMessage(error, fallbackMessage);
 }
 
+let currentProjectIdForRequests: string | null = null;
+
+export function setCurrentProjectIdForRequests(projectId: string | null): void {
+  currentProjectIdForRequests = projectId;
+}
+
+export function getCurrentProjectIdForRequests(): string | null {
+  return currentProjectIdForRequests;
+}
+
+function appendProjectIdIfMissing(path: string): string {
+  if (!currentProjectIdForRequests) return path;
+  if (path.startsWith("/api/projects")) return path;
+  const [base, query = ""] = path.split("?");
+  const params = new URLSearchParams(query);
+  if (!params.has("projectId")) {
+    params.set("projectId", currentProjectIdForRequests);
+  }
+  const qs = params.toString();
+  return qs ? `${base}?${qs}` : base;
+}
+
 export async function apiRequest<T>(
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "DELETE" | "PUT" | "PATCH",
   path: string,
   body?: unknown
 ): Promise<T> {
-  const sanitizedPath = sanitizeTelemetryUrl(path, {
+  const requestPath = appendProjectIdIfMissing(path);
+  const sanitizedPath = sanitizeTelemetryUrl(requestPath, {
     isSensitiveKey: isSensitiveField,
     baseUrl: "http://dashboard.local",
   });
@@ -214,7 +237,7 @@ export async function apiRequest<T>(
   };
 
   try {
-    const response = await fetch(path, {
+    const response = await fetch(requestPath, {
       method,
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -270,7 +293,7 @@ export async function apiGet<T>(path: string): Promise<T> {
 }
 
 export async function apiWrite<T>(
-  method: "POST" | "DELETE",
+  method: "POST" | "DELETE" | "PUT" | "PATCH",
   path: string,
   body: unknown
 ): Promise<T> {

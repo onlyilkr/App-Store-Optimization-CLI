@@ -42,6 +42,12 @@ jest.mock("../db/owned-apps", () => ({
   listOwnedApps: jest.fn(() => []),
   upsertOwnedApps: jest.fn(),
   upsertOwnedAppSnapshots: jest.fn(),
+  addAppToProject: jest.fn(() => true),
+  removeAppFromProject: jest.fn(() => ({
+    removed: true,
+    remainingProjects: 0,
+  })),
+  listAppProjectIds: jest.fn(() => []),
 }));
 
 jest.mock("../db/app-keywords", () => ({
@@ -435,6 +441,8 @@ describe("dashboard server routes", () => {
       data: {
         id: "123",
         removedKeywordCount: 3,
+        fullyDeleted: true,
+        remainingProjects: 0,
       },
     });
   });

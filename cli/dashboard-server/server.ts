@@ -558,8 +558,10 @@ export function createServerRequestHandler(): http.RequestListener {
       }
 
       if (req.method === "DELETE" && pathname === "/api/apps") {
+        const projectId = resolveProjectId(query, res, sendApiError);
+        if (!projectId) return;
         await runAsForegroundMutation(() =>
-          appsHandlers.handleApiAppsDelete(req, res)
+          appsHandlers.handleApiAppsDelete(req, res, projectId)
         );
         return;
       }

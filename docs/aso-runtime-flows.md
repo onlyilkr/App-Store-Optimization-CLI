@@ -24,6 +24,8 @@ Runtime flow contracts across CLI commands, local dashboard API, and ASO service
 - MCP `aso_evaluate_keywords`: accept explicit keywords (max 100), run `aso keywords "<comma-separated-keywords>" --stdout`, return evaluated keyword results.
 - Dashboard API mutations: app add (single-item POST; UI may batch multiple selections), app delete, keyword add/delete, keyword favorite toggle, auth start/respond, setup start/respond.
 - Dashboard API reads (compare): `GET /api/aso/compare/keywords?appIds=...` returns the union of keywords tracked across the selected apps with coverage metadata; `POST /api/aso/compare/matrix` returns a per-(app, keyword) rank matrix derived from `aso_keywords.ordered_app_ids`. Both are read-only and do not touch `keywordPipelineService` or `keywordWriteRepository`.
+- Dashboard API (projects): `GET/POST /api/projects`, `PATCH/DELETE /api/projects/:id`, `GET/PUT /api/projects/current` manage workspace definitions. Workspace-scoped routes (`/api/apps`, `/api/aso/*`) accept a `projectId` query parameter that filters owned apps and research keyword pools. The current projectId is mirrored into the `metadata` table so CLI commands default to the last-used project. Global keyword caches (`aso_keywords`, `aso_apps`, `aso_keyword_failures`) remain shared across projects.
+- Move app: `PATCH /api/apps/:id { projectId }` reassigns an owned app to another project. Associated `app_keywords`, `owned_app_country_ratings`, and `app_keyword_position_history` follow the app via its `app_id`.
 
 ## Boundary Ownership
 - Domain policy (`cli/domain/keywords/*`, `cli/domain/errors/*`) is shared across CLI/server/UI for country guardrails, keyword normalization, limits, and dashboard-safe error/message mapping.

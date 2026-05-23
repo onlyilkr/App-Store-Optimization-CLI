@@ -97,6 +97,35 @@ function ensureOwnedAppsProjectIndexes(database: Database.Database): void {
   `);
 }
 
+function ensureOwnedAppProjectMembershipsTable(
+  database: Database.Database
+): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS owned_app_project_memberships (
+      app_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      added_at TEXT NOT NULL,
+      PRIMARY KEY (app_id, project_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_owned_app_project_memberships_project
+      ON owned_app_project_memberships(project_id);
+    CREATE INDEX IF NOT EXISTS idx_owned_app_project_memberships_app
+      ON owned_app_project_memberships(app_id);
+  `);
+}
+
+function backfillOwnedAppProjectMemberships(
+  database: Database.Database
+): void {
+  const now = new Date().toISOString();
+  database
+    .prepare(
+      `INSERT OR IGNORE INTO owned_app_project_memberships (app_id, project_id, added_at)
+       SELECT id, project_id, ? FROM owned_apps WHERE project_id IS NOT NULL`
+    )
+    .run(now);
+}
+
 function migrateLegacyResearchAppId(database: Database.Database): void {
   if (process.env[SKIP_RESEARCH_RENAME_ENV] === "1") return;
   const legacy = database
@@ -275,6 +304,8 @@ function initializeDatabase(database: Database.Database): void {
   ensureProjectIdColumnOnOwnedApps(database);
   ensureOwnedAppsProjectIndexes(database);
   migrateLegacyResearchAppId(database);
+  ensureOwnedAppProjectMembershipsTable(database);
+  backfillOwnedAppProjectMemberships(database);
   ensureAppKeywordFavoriteColumn(database);
   database.exec(`
     CREATE INDEX IF NOT EXISTS idx_app_keywords_country_app_favorite

@@ -1,8 +1,9 @@
 import * as http from "http";
 import {
+  addAppToProject,
   deleteOwnedAppById,
   getOwnedAppById,
-  moveAppToProject,
+  removeAppFromProject,
   upsertOwnedApps,
   upsertOwnedAppSnapshots,
 } from "../db/owned-apps";
@@ -143,6 +144,7 @@ export function createAppsHandlers(deps: CreateAppsHandlersDeps) {
 
       const country = deps.hydrationCountry;
       upsertOwnedApps([{ id: appId, kind: "owned", name: appId, projectId }]);
+      addAppToProject(appId, projectId);
       let hydratedName = appId;
       try {
         const snapshots = await deps.fetchOwnedAppSnapshotsFromApi(country, [appId]);
@@ -187,6 +189,7 @@ export function createAppsHandlers(deps: CreateAppsHandlersDeps) {
     ensureDefaultResearchAppExists(projectId);
     const id = nextResearchAppId(slug);
     upsertOwnedApps([{ id, kind: "research", name, projectId }]);
+    addAppToProject(id, projectId);
     deps.sendJson(res, 201, {
       success: true,
       data: {
@@ -198,7 +201,8 @@ export function createAppsHandlers(deps: CreateAppsHandlersDeps) {
 
   async function handleApiAppsDelete(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
+    projectId: string = DEFAULT_PROJECT_ID
   ): Promise<void> {
     const body = await deps.parseJsonBody<DeleteAppRequest>(req, res);
     if (!body) {
@@ -227,11 +231,20 @@ export function createAppsHandlers(deps: CreateAppsHandlersDeps) {
       return;
     }
 
-    const removedKeywordCount = deleteAppKeywordsByAppId(appId);
-    const removedAppCount = deleteOwnedAppById(appId);
-    if (removedAppCount === 0) {
-      deps.sendApiError(res, 404, "NOT_FOUND", "App not found.");
-      return;
+    // Remove the app from the current project. If no other project still
+    // lists it, fully delete the app + keyword data. This lets an app live
+    // in multiple projects at once.
+    const { remainingProjects } = removeAppFromProject(appId, projectId);
+    let removedKeywordCount = 0;
+    let fullyDeleted = false;
+    if (remainingProjects === 0) {
+      removedKeywordCount = deleteAppKeywordsByAppId(appId);
+      const removedAppCount = deleteOwnedAppById(appId);
+      if (removedAppCount === 0) {
+        deps.sendApiError(res, 404, "NOT_FOUND", "App not found.");
+        return;
+      }
+      fullyDeleted = true;
     }
 
     deps.sendJson(res, 200, {
@@ -239,6 +252,8 @@ export function createAppsHandlers(deps: CreateAppsHandlersDeps) {
       data: {
         id: appId,
         removedKeywordCount,
+        fullyDeleted,
+        remainingProjects,
       },
     });
   }
@@ -285,16 +300,13 @@ export function createAppsHandlers(deps: CreateAppsHandlersDeps) {
       );
       return;
     }
-    const moved = moveAppToProject(normalized, project.id);
-    if (!moved) {
-      deps.sendApiError(res, 404, "NOT_FOUND", "App not found.");
-      return;
-    }
+    const added = addAppToProject(normalized, project.id);
     deps.sendJson(res, 200, {
       success: true,
       data: {
         id: normalized,
         projectId: project.id,
+        addedMembership: added,
       },
     });
   }

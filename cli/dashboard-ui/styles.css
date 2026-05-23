@@ -3347,3 +3347,336 @@ td.updated-value {
 .compare-cell--tier-mid {
   background: color-mix(in oklab, var(--primary) 4%, transparent);
 }
+
+/* -------- Projects (workspaces) -------- */
+
+:root {
+  --project-color-slate: oklch(0.72 0.03 245);
+  --project-color-blue: oklch(0.70 0.16 235);
+  --project-color-green: oklch(0.72 0.16 148);
+  --project-color-amber: oklch(0.80 0.15 80);
+  --project-color-red: oklch(0.68 0.21 22);
+  --project-color-purple: oklch(0.70 0.17 295);
+  --project-color-pink: oklch(0.74 0.18 340);
+  --project-color-teal: oklch(0.74 0.13 195);
+}
+
+.project-selector {
+  position: relative;
+  min-width: 0;
+  flex: 1;
+}
+
+.project-selector-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.project-selector-trigger:hover,
+.project-selector-trigger.is-open {
+  background: color-mix(in oklab, var(--primary) 10%, transparent);
+  border-color: color-mix(in oklab, var(--border) 90%, transparent);
+}
+
+.project-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--project-color-slate);
+  box-shadow: 0 0 0 1px color-mix(in oklab, currentColor 14%, transparent);
+}
+
+.project-color-slate { background: var(--project-color-slate); }
+.project-color-blue { background: var(--project-color-blue); }
+.project-color-green { background: var(--project-color-green); }
+.project-color-amber { background: var(--project-color-amber); }
+.project-color-red { background: var(--project-color-red); }
+.project-color-purple { background: var(--project-color-purple); }
+.project-color-pink { background: var(--project-color-pink); }
+.project-color-teal { background: var(--project-color-teal); }
+
+.project-selector-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.project-selector-caret {
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+
+.project-selector-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgb(0 0 0 / 40%);
+  padding: 4px;
+  min-width: 220px;
+}
+
+.project-selector-list {
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-selector-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  border-radius: 4px;
+  text-align: left;
+  font-size: 12px;
+}
+
+.project-selector-option:hover,
+.project-selector-option.is-active {
+  background: color-mix(in oklab, var(--primary) 14%, transparent);
+}
+
+.project-selector-option-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-selector-option-meta {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.project-selector-footer {
+  margin-top: 4px;
+  border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+  padding-top: 4px;
+  display: flex;
+  flex-direction: column;
+}
+
+.project-selector-footer-action {
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+}
+
+.project-selector-footer-action:hover {
+  background: color-mix(in oklab, var(--primary) 10%, transparent);
+  color: var(--foreground);
+}
+
+.project-dialog-card {
+  width: min(460px, 92vw);
+  padding: 18px;
+}
+
+.project-manage-card {
+  width: min(680px, 92vw);
+}
+
+.project-dialog-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.project-dialog-label,
+.project-dialog-color-label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.project-dialog-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.project-color-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.project-color-swatch:hover {
+  transform: scale(1.06);
+}
+
+.project-color-swatch.is-selected {
+  border-color: color-mix(in oklab, var(--foreground) 60%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 60%, transparent);
+}
+
+.project-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.project-dialog-error {
+  margin: 0;
+  color: var(--destructive);
+  font-size: 12px;
+}
+
+.project-manage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.project-manage-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
+  border-radius: 6px;
+}
+
+.project-manage-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.project-manage-row-main .ui-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.project-manage-row-meta {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.project-manage-row-colors {
+  display: flex;
+  gap: 4px;
+}
+
+.project-manage-row-colors .project-color-swatch {
+  width: 16px;
+  height: 16px;
+}
+
+.project-manage-confirm-backdrop {
+  background: rgb(0 0 0 / 40%);
+  z-index: 1100 !important;
+}
+
+.project-manage-confirm-body {
+  margin: 6px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.sidebar.project-accent-slate .sidebar-header {
+  border-bottom-color: color-mix(in oklab, var(--project-color-slate) 26%, var(--border));
+}
+.sidebar.project-accent-blue .sidebar-header {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--project-color-blue) 20%, transparent), transparent 80%);
+  border-bottom-color: color-mix(in oklab, var(--project-color-blue) 30%, var(--border));
+}
+.sidebar.project-accent-green .sidebar-header {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--project-color-green) 20%, transparent), transparent 80%);
+  border-bottom-color: color-mix(in oklab, var(--project-color-green) 30%, var(--border));
+}
+.sidebar.project-accent-amber .sidebar-header {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--project-color-amber) 20%, transparent), transparent 80%);
+  border-bottom-color: color-mix(in oklab, var(--project-color-amber) 30%, var(--border));
+}
+.sidebar.project-accent-red .sidebar-header {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--project-color-red) 18%, transparent), transparent 80%);
+  border-bottom-color: color-mix(in oklab, var(--project-color-red) 30%, var(--border));
+}
+.sidebar.project-accent-purple .sidebar-header {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--project-color-purple) 20%, transparent), transparent 80%);
+  border-bottom-color: color-mix(in oklab, var(--project-color-purple) 30%, var(--border));
+}
+.sidebar.project-accent-pink .sidebar-header {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--project-color-pink) 20%, transparent), transparent 80%);
+  border-bottom-color: color-mix(in oklab, var(--project-color-pink) 30%, var(--border));
+}
+.sidebar.project-accent-teal .sidebar-header {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--project-color-teal) 20%, transparent), transparent 80%);
+  border-bottom-color: color-mix(in oklab, var(--project-color-teal) 30%, var(--border));
+}
+
+.projects-migration-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: color-mix(in oklab, var(--primary) 14%, transparent);
+  border-bottom: 1px solid color-mix(in oklab, var(--primary) 28%, transparent);
+  font-size: 12px;
+}
+
+.projects-migration-banner-body {
+  flex: 1;
+  color: var(--foreground);
+}
+
+.projects-migration-banner-close {
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+}
+
+.projects-migration-banner-close:hover {
+  color: var(--foreground);
+}

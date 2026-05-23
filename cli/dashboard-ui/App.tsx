@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Button, Card, Input } from "./ui-react";
-import { DEFAULT_RESEARCH_APP_ID } from "../shared/aso-research";
+import {
+  DEFAULT_RESEARCH_APP_ID,
+  researchAppIdForProject,
+} from "../shared/aso-research";
 import {
   DEFAULT_ASO_COUNTRY,
   apiGet,
@@ -36,6 +39,11 @@ import { KeywordActionMenu } from "./components/keyword-action-menu";
 import { AddAppDialog } from "./components/add-app-dialog";
 import { AppActionMenu } from "./components/app-action-menu";
 import { CompareView } from "./components/CompareView";
+import { ProjectSelector } from "./components/ProjectSelector";
+import { ProjectCreateDialog } from "./components/ProjectCreateDialog";
+import { ProjectManageDialog } from "./components/ProjectManageDialog";
+import { ProjectsMigrationBanner } from "./components/ProjectsMigrationBanner";
+import { useCurrentProject } from "./hooks/use-current-project";
 import {
   DASHBOARD_FILTER_DEFAULTS,
   DASHBOARD_FILTER_OPTIONS,
@@ -317,6 +325,13 @@ export function App() {
   const [keywordActionMenu, setKeywordActionMenu] = useState<KeywordActionMenuState | null>(null);
   const [appActionMenu, setAppActionMenu] = useState<AppActionMenuState | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [projectCreateOpen, setProjectCreateOpen] = useState(false);
+  const [projectManageOpen, setProjectManageOpen] = useState(false);
+  const projectContext = useCurrentProject();
+  const currentProjectId = projectContext.currentProject?.id ?? null;
+  const currentResearchAppId = currentProjectId
+    ? researchAppIdForProject(currentProjectId)
+    : DEFAULT_RESEARCH_APP_ID;
   const [researchSectionCollapsed, setResearchSectionCollapsed] = useState(false);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -369,7 +384,7 @@ export function App() {
   const selectedApp = appById.get(selectedAppId);
   const selectedAppName =
     selectedApp?.name ??
-    (selectedAppId === DEFAULT_RESEARCH_APP_ID ? "Research" : selectedAppId);
+    (selectedAppId === currentResearchAppId ? "Research" : selectedAppId);
   const isSelectedAppResearch = selectedApp?.kind === "research";
   const showRankingColumns = !isSelectedAppResearch;
   const {
@@ -464,7 +479,7 @@ export function App() {
       ? "No keywords yet for this app."
       : "No keywords match the current search/filters.";
   const hasAnyAddedNonDefaultApp = useMemo(
-    () => apps.some((app) => app.id !== DEFAULT_RESEARCH_APP_ID),
+    () => apps.some((app) => app.id !== currentResearchAppId),
     [apps]
   );
   const hasAnyAddedKeyword = useMemo(
@@ -474,11 +489,14 @@ export function App() {
   const isKeywordMutationBlockedByStartupReauth =
     startupRefreshState?.requiresReauthentication === true;
 
+  const refreshProjects = projectContext.refresh;
   const loadApps = useCallback(async (): Promise<AppItem[]> => {
     const list = await apiGet<AppItem[]>(`/api/apps`);
     setApps(list);
+    // Keep project dropdown counts in sync after any app mutation that calls loadApps.
+    void refreshProjects().catch(() => {});
     return list;
-  }, []);
+  }, [refreshProjects]);
 
   const restartStartupRefresh = useCallback(async (): Promise<void> => {
     try {
@@ -624,7 +642,7 @@ export function App() {
         setHasCachedData(true);
         let activeAppId = selectedAppIdRef.current;
         if (
-          activeAppId === DEFAULT_RESEARCH_APP_ID &&
+          activeAppId === currentResearchAppId &&
           !list.some((a) => a.id === activeAppId)
         ) {
           const firstResearch = list.find((a) => a.kind === "research");
@@ -633,9 +651,9 @@ export function App() {
             setSelectedAppId(firstResearch.id);
           }
         }
-        if (activeAppId !== DEFAULT_RESEARCH_APP_ID && !list.some((a) => a.id === activeAppId)) {
-          activeAppId = DEFAULT_RESEARCH_APP_ID;
-          setSelectedAppId(DEFAULT_RESEARCH_APP_ID);
+        if (activeAppId !== currentResearchAppId && !list.some((a) => a.id === activeAppId)) {
+          activeAppId = currentResearchAppId;
+          setSelectedAppId(currentResearchAppId);
         }
         await loadKeywords(activeAppId, 1);
         keywordQueryKeyRef.current = buildKeywordQueryKey(activeAppId);
@@ -706,6 +724,14 @@ export function App() {
     startupAppSyncAtRef.current = startupRefreshState.finishedAt;
     void loadApps().catch(() => {});
   }, [startupRefreshState, loadApps]);
+
+  useEffect(() => {
+    if (!currentProjectId) return;
+    void loadApps().catch(() => {});
+    if (selectedAppId) {
+      void loadKeywords(selectedAppId, 1).catch(() => {});
+    }
+  }, [currentProjectId]);
 
   useEffect(() => {
     if (isCompactLayout && sidebarCollapsed) {
@@ -978,10 +1004,10 @@ export function App() {
         let nextSelectedAppId = selectedAppIdRef.current;
         if (!list.some((app) => app.id === nextSelectedAppId) || nextSelectedAppId === appId) {
           const fallbackApp =
-            list.find((app) => app.id === DEFAULT_RESEARCH_APP_ID) ??
+            list.find((app) => app.id === currentResearchAppId) ??
             list.find((app) => app.kind === "research") ??
             list[0];
-          nextSelectedAppId = fallbackApp?.id ?? DEFAULT_RESEARCH_APP_ID;
+          nextSelectedAppId = fallbackApp?.id ?? currentResearchAppId;
           setSelectedAppId(nextSelectedAppId);
         }
         await loadKeywords(nextSelectedAppId, 1);
@@ -997,7 +1023,7 @@ export function App() {
 
   const onSidebarAppContextMenuOpen = useCallback(
     (event: React.MouseEvent<HTMLElement>, app: AppItem) => {
-      if (app.id === DEFAULT_RESEARCH_APP_ID) return;
+      if (app.id === currentResearchAppId) return;
       if (isSidebarSelectionControlTarget(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
@@ -1912,12 +1938,23 @@ export function App() {
   const keywordPageLabel = Math.min(keywordPage, keywordTotalPages);
   return (
     <div id="app-shell" className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
-      <aside className="sidebar ui-card" aria-label="Apps">
+      <aside
+        className={`sidebar ui-card project-accent-${projectContext.currentProject?.color ?? "slate"}`}
+        aria-label="Apps"
+      >
         <div className="sidebar-header">
           <div className="sidebar-header-top">
             <div className="sidebar-brand">
               <img src="/aso-sidebar-icon.png" alt="" className="sidebar-brand-icon" aria-hidden="true" />
-              <h1>ASO Dashboard</h1>
+              <ProjectSelector
+                projects={projectContext.projects}
+                currentProject={projectContext.currentProject}
+                onSelect={(projectId) => {
+                  void projectContext.setCurrentProjectId(projectId);
+                }}
+                onCreate={() => setProjectCreateOpen(true)}
+                onManage={() => setProjectManageOpen(true)}
+              />
             </div>
             <Button
               id="toggle-sidebar"
@@ -1974,12 +2011,12 @@ export function App() {
               <>
                 {researchApps.length === 0 ? (
                   <button
-                    className={`app-item ${selectedAppId === DEFAULT_RESEARCH_APP_ID ? "active" : ""}`}
-                    data-app-id={DEFAULT_RESEARCH_APP_ID}
+                    className={`app-item ${selectedAppId === currentResearchAppId ? "active" : ""}`}
+                    data-app-id={currentResearchAppId}
                     role="tab"
-                    aria-selected={selectedAppId === DEFAULT_RESEARCH_APP_ID}
+                    aria-selected={selectedAppId === currentResearchAppId}
                     onClickCapture={(event) =>
-                      onSidebarAppClickCapture(event, DEFAULT_RESEARCH_APP_ID)
+                      onSidebarAppClickCapture(event, currentResearchAppId)
                     }
                   >
                     <span className="research-icon" aria-hidden="true">
@@ -2198,6 +2235,7 @@ export function App() {
       </aside>
 
       <main className="main">
+        <ProjectsMigrationBanner />
         <Card className="add-card">
           <form id="add-form" className="add-form" onSubmit={onAddKeywords}>
             <div className="onboarding-target-slot add-keywords-slot">
@@ -2937,6 +2975,25 @@ export function App() {
           </section>
         </div>
       ) : null}
+      <ProjectCreateDialog
+        open={projectCreateOpen}
+        onClose={() => setProjectCreateOpen(false)}
+        onSubmit={async ({ name, color }) => {
+          await projectContext.createProject({ name, color });
+        }}
+      />
+      <ProjectManageDialog
+        open={projectManageOpen}
+        projects={projectContext.projects}
+        currentProjectId={currentProjectId}
+        onClose={() => setProjectManageOpen(false)}
+        onUpdate={async (projectId, patch) => {
+          await projectContext.updateProject(projectId, patch);
+        }}
+        onDelete={async (projectId) => {
+          await projectContext.deleteProject(projectId);
+        }}
+      />
       <AddAppDialog
         open={isAddAppPopoverOpen}
         onClose={closeAddAppPopover}

@@ -67,11 +67,12 @@ export function listProjectSummaries(): ProjectSummary[] {
          p.color,
          p.created_at,
          p.updated_at,
-         (SELECT COUNT(*) FROM owned_apps oa
-          WHERE oa.project_id = p.id AND oa.kind = 'owned') AS app_count,
+         (SELECT COUNT(*) FROM owned_app_project_memberships m
+          INNER JOIN owned_apps oa ON oa.id = m.app_id
+          WHERE m.project_id = p.id AND oa.kind = 'owned') AS app_count,
          (SELECT COUNT(*) FROM app_keywords ak
-          JOIN owned_apps oa2 ON oa2.id = ak.app_id
-          WHERE oa2.project_id = p.id) AS keyword_count
+          INNER JOIN owned_app_project_memberships m2 ON m2.app_id = ak.app_id
+          WHERE m2.project_id = p.id) AS keyword_count
        FROM projects p
        ORDER BY p.created_at ASC, p.id ASC`
     )
@@ -112,15 +113,18 @@ export function getProjectCounts(id: string): {
   const db = getDb();
   const appRow = db
     .prepare(
-      `SELECT COUNT(*) AS n FROM owned_apps WHERE project_id = ? AND kind = 'owned'`
+      `SELECT COUNT(*) AS n
+       FROM owned_app_project_memberships m
+       INNER JOIN owned_apps oa ON oa.id = m.app_id
+       WHERE m.project_id = ? AND oa.kind = 'owned'`
     )
     .get(id) as { n: number };
   const keywordRow = db
     .prepare(
       `SELECT COUNT(*) AS n
        FROM app_keywords ak
-       JOIN owned_apps oa ON oa.id = ak.app_id
-       WHERE oa.project_id = ?`
+       INNER JOIN owned_app_project_memberships m ON m.app_id = ak.app_id
+       WHERE m.project_id = ?`
     )
     .get(id) as { n: number };
   return {
@@ -156,6 +160,7 @@ export function createProject(input: {
   const id = ensureUniqueSlug(desiredSlug, existing);
   const now = new Date().toISOString();
   const db = getDb();
+  const researchAppId = researchAppIdForProject(id);
   const tx = db.transaction(() => {
     db.prepare(
       `INSERT INTO projects (id, name, color, created_at, updated_at)
@@ -164,7 +169,11 @@ export function createProject(input: {
     db.prepare(
       `INSERT OR IGNORE INTO owned_apps (id, kind, name, icon_json, project_id)
        VALUES (?, 'research', ?, NULL, ?)`
-    ).run(researchAppIdForProject(id), DEFAULT_RESEARCH_APP_NAME, id);
+    ).run(researchAppId, DEFAULT_RESEARCH_APP_NAME, id);
+    db.prepare(
+      `INSERT OR IGNORE INTO owned_app_project_memberships (app_id, project_id, added_at)
+       VALUES (?, ?, ?)`
+    ).run(researchAppId, id, now);
   });
   tx();
   const created = getProjectById(id);
@@ -231,15 +240,31 @@ export function deleteProject(id: string): {
   const counts = getProjectCounts(id);
   const db = getDb();
   const tx = db.transaction(() => {
-    const appIdRows = db
-      .prepare(`SELECT id FROM owned_apps WHERE project_id = ?`)
-      .all(id) as Array<{ id: string }>;
-    for (const row of appIdRows) {
-      db.prepare(`DELETE FROM app_keywords WHERE app_id = ?`).run(row.id);
-      db.prepare(
-        `DELETE FROM app_keyword_position_history WHERE app_id = ?`
-      ).run(row.id);
-      db.prepare(`DELETE FROM owned_apps WHERE id = ?`).run(row.id);
+    // Remove all memberships for this project
+    const memberAppRows = db
+      .prepare(
+        `SELECT app_id FROM owned_app_project_memberships WHERE project_id = ?`
+      )
+      .all(id) as Array<{ app_id: string }>;
+    db.prepare(
+      `DELETE FROM owned_app_project_memberships WHERE project_id = ?`
+    ).run(id);
+    // For any app that is now orphaned (no remaining memberships), delete the
+    // app and its keyword-related rows. Research apps are always orphaned on
+    // project delete because they are pinned 1:1 to the project.
+    for (const row of memberAppRows) {
+      const remaining = db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM owned_app_project_memberships WHERE app_id = ?`
+        )
+        .get(row.app_id) as { n: number };
+      if ((remaining?.n ?? 0) === 0) {
+        db.prepare(`DELETE FROM app_keywords WHERE app_id = ?`).run(row.app_id);
+        db.prepare(
+          `DELETE FROM app_keyword_position_history WHERE app_id = ?`
+        ).run(row.app_id);
+        db.prepare(`DELETE FROM owned_apps WHERE id = ?`).run(row.app_id);
+      }
     }
     db.prepare(`DELETE FROM projects WHERE id = ?`).run(id);
   });

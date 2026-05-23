@@ -131,6 +131,10 @@ describe("projects", () => {
        VALUES (?, 'owned', ?, NULL, ?)`
     ).run("11111", "Temp App", project.id);
     db.prepare(
+      `INSERT INTO owned_app_project_memberships (app_id, project_id, added_at)
+       VALUES (?, ?, ?)`
+    ).run("11111", project.id, new Date().toISOString());
+    db.prepare(
       `INSERT INTO app_keywords (app_id, keyword, country, is_favorite, previous_position, added_at)
        VALUES (?, ?, 'US', 0, NULL, ?)`
     ).run("11111", "temp kw", new Date().toISOString());
@@ -175,6 +179,10 @@ describe("projects", () => {
       `INSERT INTO owned_apps (id, kind, name, icon_json, project_id)
        VALUES (?, 'owned', ?, NULL, ?)`
     ).run("22222", "Data App", project.id);
+    db.prepare(
+      `INSERT INTO owned_app_project_memberships (app_id, project_id, added_at)
+       VALUES (?, ?, ?)`
+    ).run("22222", project.id, new Date().toISOString());
     db.prepare(
       `INSERT INTO app_keywords (app_id, keyword, country, is_favorite, previous_position, added_at)
        VALUES (?, ?, 'US', 0, NULL, ?)`
