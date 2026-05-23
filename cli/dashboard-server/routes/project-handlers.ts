@@ -11,7 +11,9 @@ import { getMetadataValue, setMetadataValue } from "../../db/metadata";
 import {
   DEFAULT_PROJECT_ID,
   isValidProjectColor,
+  isValidProjectCountry,
   type ProjectColor,
+  type ProjectCountry,
 } from "../../shared/project-types";
 
 type ProjectHandlersDeps = {
@@ -78,6 +80,7 @@ export function createProjectHandlers(deps: ProjectHandlersDeps) {
     const body = await deps.parseJsonBody<{
       name?: string;
       color?: string;
+      country?: string;
     }>(req, res);
     if (!body) return;
     if (typeof body.name !== "string") {
@@ -89,11 +92,23 @@ export function createProjectHandlers(deps: ProjectHandlersDeps) {
       );
       return;
     }
+    if (body.country !== undefined && !isValidProjectCountry(body.country)) {
+      deps.sendApiError(
+        res,
+        400,
+        "INVALID_REQUEST",
+        `Unsupported country "${body.country}".`
+      );
+      return;
+    }
     const color: ProjectColor | undefined = isValidProjectColor(body.color)
       ? body.color
       : undefined;
+    const country: ProjectCountry | undefined = isValidProjectCountry(body.country)
+      ? (body.country.toUpperCase() as ProjectCountry)
+      : undefined;
     try {
-      const project = createProject({ name: body.name, color });
+      const project = createProject({ name: body.name, color, country });
       deps.sendJson(res, 201, { success: true, data: project });
     } catch (error) {
       handleProjectError(res, deps, error);
@@ -108,15 +123,29 @@ export function createProjectHandlers(deps: ProjectHandlersDeps) {
     const body = await deps.parseJsonBody<{
       name?: string;
       color?: string;
+      country?: string;
     }>(req, res);
     if (!body) return;
+    if (body.country !== undefined && !isValidProjectCountry(body.country)) {
+      deps.sendApiError(
+        res,
+        400,
+        "INVALID_REQUEST",
+        `Unsupported country "${body.country}".`
+      );
+      return;
+    }
     const color: ProjectColor | undefined = isValidProjectColor(body.color)
       ? body.color
+      : undefined;
+    const country: ProjectCountry | undefined = isValidProjectCountry(body.country)
+      ? (body.country.toUpperCase() as ProjectCountry)
       : undefined;
     try {
       const updated = updateProject(id, {
         name: typeof body.name === "string" ? body.name : undefined,
         color,
+        country,
       });
       if (!updated) {
         deps.sendApiError(res, 404, "PROJECT_NOT_FOUND", "Project not found.");
