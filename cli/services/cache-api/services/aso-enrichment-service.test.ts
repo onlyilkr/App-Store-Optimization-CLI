@@ -1,6 +1,7 @@
 import { jest } from "@jest/globals";
 import {
   __resetIncompleteTopDocLookupCooldownForTests,
+  __testing__,
   enrichKeyword,
   refreshKeywordOrder,
 } from "./aso-enrichment-service";
@@ -1039,5 +1040,21 @@ describe("aso-enrichment-service", () => {
     );
 
     expect(result.isBrandKeyword).toBe(false);
+  });
+});
+
+describe("aso-enrichment-service storefront resolution", () => {
+  it("uses TR storefront id when country=TR", () => {
+    expect(__testing__.getStoreFrontHeader("TR")).toBe("143480-1,29");
+  });
+
+  it("composes /de/ url segment when country=DE", () => {
+    expect(__testing__.composeSearchUrl("DE")).toBe(
+      "https://apps.apple.com/de/iphone/search"
+    );
+  });
+
+  it("rejects unsupported country instead of silently falling back to US", () => {
+    expect(() => __testing__.getStoreFrontHeader("ZZ")).toThrow(/Unsupported country/);
   });
 });

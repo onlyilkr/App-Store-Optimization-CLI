@@ -14,6 +14,11 @@ import type { AsoAppDoc, AsoAppDocIcon } from "./aso-types";
 import { asoAppleGet } from "./aso-apple-client";
 import { reportAppleContractChange } from "../../keywords/apple-http-trace";
 import { getStorefrontDefaultLanguage } from "../../../shared/aso-storefront-localizations";
+import {
+  getAppStoreDslangCookieHeader,
+  getAppStoreUrlSegment,
+  getStorefrontConfig,
+} from "../../../shared/aso-storefronts";
 import { ASO_APPLE_WEB_USER_AGENT } from "../../../shared/aso-apple-http";
 import type { KeywordMatchType } from "../../../shared/aso-keyword-match";
 import {
@@ -74,11 +79,7 @@ interface AmpSearchResponse {
 }
 
 const MZSEARCH_PLATFORM_ID_JSON = 29;
-const STORE_FRONT_ID_BY_COUNTRY: Record<string, number> = {
-  US: 143441,
-};
 const MZSEARCH_ORDER_URL = "https://search.itunes.apple.com/WebObjects/MZSearch.woa/wa/search";
-const APPSTORE_SEARCH_URL = "https://apps.apple.com/us/iphone/search";
 const INSUFFICIENT_DOCS_RETRY_COUNT = 1;
 const INSUFFICIENT_DOCS_RETRY_BACKOFF_MS = 150;
 const INCOMPLETE_TOP_DOC_LOOKUP_COOLDOWN_MS = 10 * 60 * 1000;
@@ -301,14 +302,15 @@ function appCompetitiveScore(app: AsoAppDoc, keyword: string): number {
 }
 
 function getStoreFrontHeader(country: string): string {
-  const storeId = STORE_FRONT_ID_BY_COUNTRY[country.toUpperCase()] || 143441;
-  return `${storeId}-1,${MZSEARCH_PLATFORM_ID_JSON}`;
+  const config = getStorefrontConfig(country);
+  return `${config.storefrontId}-1,${MZSEARCH_PLATFORM_ID_JSON}`;
 }
 
 async function fetchPopularityOrderedIds(params: {
   keyword: string;
   country: string;
 }): Promise<string[]> {
+  const storefront = getStorefrontConfig(params.country);
   const response = await asoAppleGet<MzSearchResponse>(
     MZSEARCH_ORDER_URL,
     {
@@ -319,8 +321,8 @@ async function fetchPopularityOrderedIds(params: {
       },
       headers: {
         "User-Agent": ASO_APPLE_WEB_USER_AGENT,
-        "Accept-Language": "en-US,en;q=0.9",
-        Cookie: "dslang=US-EN",
+        "Accept-Language": storefront.acceptLanguage,
+        Cookie: getAppStoreDslangCookieHeader(params.country),
         "x-apple-store-front": getStoreFrontHeader(params.country),
       },
       timeout: 30000,
@@ -423,13 +425,15 @@ async function fetchSearchPageOrderedData(params: {
   orderedAppIds: string[];
   appDocs: AsoAppDoc[];
 }> {
-  const response = await asoAppleGet(APPSTORE_SEARCH_URL, {
+  const storefront = getStorefrontConfig(params.country);
+  const searchUrl = `https://apps.apple.com/${getAppStoreUrlSegment(params.country)}/iphone/search`;
+  const response = await asoAppleGet(searchUrl, {
     operation: "appstore.search-page",
     params: { term: params.keyword },
     headers: {
       "User-Agent": ASO_APPLE_WEB_USER_AGENT,
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9",
+      "Accept-Language": storefront.acceptLanguage,
     },
     timeout: 30000,
   });
@@ -512,7 +516,7 @@ export async function refreshKeywordOrder(params: {
     reportAppleContractChange({
       provider: "apple-appstore",
       operation: "appstore.search-page",
-      endpoint: APPSTORE_SEARCH_URL,
+      endpoint: `https://apps.apple.com/${getAppStoreUrlSegment(country)}/iphone/search`,
       expectedContract:
         "Search page includes serialized-server-data with ordered app ids",
       actualSignal: htmlMessage,
@@ -895,7 +899,7 @@ export async function enrichKeyword(
     reportAppleContractChange({
       provider: "apple-appstore",
       operation: "appstore.search-page",
-      endpoint: APPSTORE_SEARCH_URL,
+      endpoint: `https://apps.apple.com/${getAppStoreUrlSegment(country)}/iphone/search`,
       expectedContract:
         "Search page includes serialized-server-data with ordered app ids and lockups",
       actualSignal: htmlMessage,
@@ -1161,3 +1165,9 @@ export async function enrichKeyword(
     appDocs,
   };
 }
+
+export const __testing__ = {
+  getStoreFrontHeader,
+  composeSearchUrl: (country: string) =>
+    `https://apps.apple.com/${getAppStoreUrlSegment(country)}/iphone/search`,
+};
