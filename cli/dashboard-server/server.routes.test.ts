@@ -28,6 +28,7 @@ import {
   refreshAsoKeywordOrderLocal,
 } from "../services/keywords/aso-local-cache-service";
 import { getDb } from "../db/store";
+import { getProjectById, getProjectCountry } from "../db/projects";
 import { asoAuthService } from "../services/auth/aso-auth-service";
 import { keywordPipelineService } from "../services/keywords/keyword-pipeline-service";
 import { isAsoAuthReauthRequiredError } from "../services/keywords/aso-popularity-service";
@@ -145,6 +146,15 @@ jest.mock("./owned-app-details", () => ({
   fetchOwnedAppSnapshotsFromApi: jest.fn(async () => []),
 }));
 
+jest.mock("../db/projects", () => ({
+  getProjectById: jest.fn(() => null),
+  getProjectCountry: jest.fn(() => "US"),
+}));
+
+jest.mock("../db/metadata", () => ({
+  setMetadataValue: jest.fn(),
+}));
+
 jest.mock("../utils/logger", () => ({
   logger: {
     debug: jest.fn(),
@@ -258,6 +268,8 @@ describe("dashboard server routes", () => {
   const mockGetCompetitorAppDocs = jest.mocked(getCompetitorAppDocs);
   const mockUpsertCompetitorAppDocs = jest.mocked(upsertCompetitorAppDocs);
   const mockFetchOwnedAppSnapshotsFromApi = jest.mocked(fetchOwnedAppSnapshotsFromApi);
+  const mockGetProjectById = jest.mocked(getProjectById);
+  const mockGetProjectCountry = jest.mocked(getProjectCountry);
   const mockGetAsoAppDocsLocal = jest.mocked(getAsoAppDocsLocal);
   const mockRefreshAsoKeywordOrderLocal = jest.mocked(refreshAsoKeywordOrderLocal);
   const mockReAuthenticate = jest.mocked(asoAuthService.reAuthenticate);
@@ -290,6 +302,8 @@ describe("dashboard server routes", () => {
     mockGetKeyword.mockReturnValue(null);
     mockGetCompetitorAppDocs.mockReturnValue([]);
     mockFetchOwnedAppSnapshotsFromApi.mockResolvedValue([]);
+    mockGetProjectById.mockReturnValue(null);
+    mockGetProjectCountry.mockReturnValue("US" as any);
     mockUpsertOwnedAppSnapshots.mockImplementation(() => {});
     mockGetAsoAppDocsLocal.mockResolvedValue([]);
     mockRefreshAsoKeywordOrderLocal.mockResolvedValue({
@@ -1513,5 +1527,35 @@ describe("dashboard server routes", () => {
     });
     expect(notFoundApi.statusCode).toBe(404);
     expect(notFoundApi.text).toContain("Not found");
+  });
+
+  it("POST /api/apps?projectId=<tr-project> hydrates with TR storefront", async () => {
+    mockGetProjectById.mockImplementation((id: string) =>
+      id === "tr-test-12"
+        ? ({ id: "tr-test-12", name: "TR-Test-12", country: "TR" } as any)
+        : null
+    );
+    mockGetProjectCountry.mockImplementation((id: string) =>
+      (id === "tr-test-12" ? "TR" : "US") as any
+    );
+
+    let capturedCountry: string | null = null;
+    mockFetchOwnedAppSnapshotsFromApi.mockImplementation(
+      async (country: string) => {
+        capturedCountry = country;
+        return [];
+      }
+    );
+
+    const response = await request({
+      method: "POST",
+      path: "/api/apps?projectId=tr-test-12",
+      body: { type: "app", appId: "1234567890" },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(mockFetchOwnedAppSnapshotsFromApi).toHaveBeenCalled();
+    expect(capturedCountry).toBe("TR");
+    expect(mockGetProjectCountry).toHaveBeenCalledWith("tr-test-12");
   });
 });

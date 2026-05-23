@@ -53,6 +53,7 @@ import {
   ensureDefaultResearchAppExists,
 } from "./apps-handler";
 import { fetchOwnedAppSnapshotsFromApi } from "./owned-app-details";
+import { getProjectCountry } from "../db/projects";
 import { ASO_ENV } from "../shared/aso-env";
 import type {
   AsoInteractivePrompt,
@@ -60,7 +61,6 @@ import type {
 } from "../shared/aso-interactive-prompts";
 
 const DEFAULT_PORT = 3456;
-const DEFAULT_APP_DOCS_HYDRATION_COUNTRY = DEFAULT_ASO_COUNTRY;
 const DASHBOARD_PUBLIC_DIR = path.resolve(__dirname, "dashboard-public");
 const DASHBOARD_RUNTIME_CONFIG_PATH = "/runtime-config.js";
 
@@ -287,7 +287,7 @@ const appsHandlers = createAppsHandlers({
   sendApiError,
   reportDashboardError,
   fetchOwnedAppSnapshotsFromApi,
-  hydrationCountry: DEFAULT_APP_DOCS_HYDRATION_COUNTRY,
+  resolveHydrationCountry: (projectId) => getProjectCountry(projectId),
 });
 
 function handleApiAsoAuthStatusGet(res: http.ServerResponse): void {
@@ -487,8 +487,9 @@ export function createServerRequestHandler(): http.RequestListener {
       if (req.method === "GET" && pathname === "/api/apps") {
         const projectId = resolveProjectId(query, res, sendApiError);
         if (!projectId) return;
+        const country = getProjectCountry(projectId);
         ensureDefaultResearchAppExists(projectId);
-        let apps = listOwnedApps(DEFAULT_APP_DOCS_HYDRATION_COUNTRY, projectId);
+        let apps = listOwnedApps(country, projectId);
         const nowMs = Date.now();
         const refreshMaxAgeMs = ASO_ENV.ownedAppDocRefreshMaxAgeMs;
         const staleOwnedAppIds = apps
@@ -505,13 +506,13 @@ export function createServerRequestHandler(): http.RequestListener {
         if (staleOwnedAppIds.length > 0) {
           try {
             const snapshots = await fetchOwnedAppSnapshotsFromApi(
-              DEFAULT_APP_DOCS_HYDRATION_COUNTRY,
+              country,
               staleOwnedAppIds
             );
             if (snapshots.length > 0) {
-              upsertOwnedAppSnapshots(DEFAULT_APP_DOCS_HYDRATION_COUNTRY, snapshots);
+              upsertOwnedAppSnapshots(country, snapshots);
             }
-            apps = listOwnedApps(DEFAULT_APP_DOCS_HYDRATION_COUNTRY, projectId);
+            apps = listOwnedApps(country, projectId);
           } catch (error) {
             reportDashboardError(error, {
               method: "GET",

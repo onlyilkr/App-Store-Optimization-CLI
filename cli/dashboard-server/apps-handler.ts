@@ -47,7 +47,7 @@ type CreateAppsHandlersDeps = {
     country: string,
     appIds: string[]
   ) => Promise<OwnedAppSnapshot[]>;
-  hydrationCountry: string;
+  resolveHydrationCountry: (projectId: string) => string;
 };
 
 type DeleteAppRequest = {
@@ -142,7 +142,7 @@ export function createAppsHandlers(deps: CreateAppsHandlersDeps) {
         return;
       }
 
-      const country = deps.hydrationCountry;
+      const country = deps.resolveHydrationCountry(projectId);
       upsertOwnedApps([{ id: appId, kind: "owned", name: appId, projectId }]);
       addAppToProject(appId, projectId);
       let hydratedName = appId;
@@ -225,7 +225,8 @@ export function createAppsHandlers(deps: CreateAppsHandlersDeps) {
       return;
     }
 
-    const existing = getOwnedAppById(appId, deps.hydrationCountry);
+    const country = deps.resolveHydrationCountry(projectId);
+    const existing = getOwnedAppById(appId, country);
     if (!existing) {
       deps.sendApiError(res, 404, "NOT_FOUND", "App not found.");
       return;
@@ -286,7 +287,8 @@ export function createAppsHandlers(deps: CreateAppsHandlersDeps) {
       deps.sendApiError(res, 404, "PROJECT_NOT_FOUND", "Project not found.");
       return;
     }
-    const existing = getOwnedAppById(normalized, deps.hydrationCountry);
+    const country = deps.resolveHydrationCountry(project.id);
+    const existing = getOwnedAppById(normalized, country);
     if (!existing) {
       deps.sendApiError(res, 404, "NOT_FOUND", "App not found.");
       return;
