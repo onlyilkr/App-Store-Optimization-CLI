@@ -682,65 +682,91 @@ export function createServerRequestHandler(): http.RequestListener {
       }
 
       if (req.method === "GET" && pathname === "/api/aso/keywords") {
-        asoRouteHandlers.handleApiAsoKeywordsGet(res, query);
+        const projectId = resolveProjectId(query, res, sendApiError);
+        if (!projectId) return;
+        asoRouteHandlers.handleApiAsoKeywordsGet(res, query, projectId);
         return;
       }
 
       if (req.method === "GET" && pathname === "/api/aso/keywords/history") {
-        asoRouteHandlers.handleApiAsoKeywordHistoryGet(res, query);
+        const projectId = resolveProjectId(query, res, sendApiError);
+        if (!projectId) return;
+        asoRouteHandlers.handleApiAsoKeywordHistoryGet(res, query, projectId);
         return;
       }
 
       if (req.method === "GET" && pathname === "/api/aso/top-apps") {
-        await asoRouteHandlers.handleApiAsoTopAppsGet(res, query);
+        const projectId = resolveProjectId(query, res, sendApiError);
+        if (!projectId) return;
+        await asoRouteHandlers.handleApiAsoTopAppsGet(res, query, projectId);
         return;
       }
 
       if (req.method === "GET" && pathname === "/api/aso/apps/search") {
-        await asoRouteHandlers.handleApiAsoAppsSearchGet(res, query);
+        const projectId = resolveProjectId(query, res, sendApiError);
+        if (!projectId) return;
+        await asoRouteHandlers.handleApiAsoAppsSearchGet(res, query, projectId);
         return;
       }
 
       if (req.method === "POST" && pathname === "/api/aso/keywords") {
+        const projectId = resolveProjectId(query, res, sendApiError);
+        if (!projectId) return;
         await runAsForegroundMutation(() =>
-          asoRouteHandlers.handleApiAsoKeywordsPost(req, res)
+          asoRouteHandlers.handleApiAsoKeywordsPost(req, res, projectId)
         );
         return;
       }
 
       if (req.method === "POST" && pathname === "/api/aso/keywords/favorite") {
+        const projectId = resolveProjectId(query, res, sendApiError);
+        if (!projectId) return;
         await runAsForegroundMutation(() =>
-          asoRouteHandlers.handleApiAsoKeywordsFavoritePost(req, res)
+          asoRouteHandlers.handleApiAsoKeywordsFavoritePost(req, res, projectId)
         );
         return;
       }
 
       if (req.method === "POST" && pathname === "/api/aso/keywords/retry-failed") {
+        const projectId = resolveProjectId(query, res, sendApiError);
+        if (!projectId) return;
         await runAsForegroundMutation(() =>
-          asoRouteHandlers.handleApiAsoKeywordsRetryFailedPost(req, res)
+          asoRouteHandlers.handleApiAsoKeywordsRetryFailedPost(
+            req,
+            res,
+            projectId
+          )
         );
         return;
       }
 
       if (req.method === "DELETE" && pathname === "/api/aso/keywords") {
+        const projectId = resolveProjectId(query, res, sendApiError);
+        if (!projectId) return;
         await runAsForegroundMutation(() =>
-          asoRouteHandlers.handleApiAsoKeywordsDelete(req, res)
+          asoRouteHandlers.handleApiAsoKeywordsDelete(req, res, projectId)
         );
         return;
       }
 
       if (req.method === "GET" && pathname === "/api/aso/apps") {
-        await asoRouteHandlers.handleApiAsoAppsGet(res, query);
+        const projectId = resolveProjectId(query, res, sendApiError);
+        if (!projectId) return;
+        await asoRouteHandlers.handleApiAsoAppsGet(res, query, projectId);
         return;
       }
 
       if (req.method === "GET" && pathname === "/api/aso/compare/keywords") {
-        asoRouteHandlers.handleCompareKeywordsGet(res, query);
+        const projectId = resolveProjectId(query, res, sendApiError);
+        if (!projectId) return;
+        asoRouteHandlers.handleCompareKeywordsGet(res, query, projectId);
         return;
       }
 
       if (req.method === "POST" && pathname === "/api/aso/compare/matrix") {
-        await asoRouteHandlers.handleCompareMatrixPost(req, res);
+        const projectId = resolveProjectId(query, res, sendApiError);
+        if (!projectId) return;
+        await asoRouteHandlers.handleCompareMatrixPost(req, res, projectId);
         return;
       }
 

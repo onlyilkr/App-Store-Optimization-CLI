@@ -2,7 +2,17 @@ import * as http from "http";
 import { logger } from "../../utils/logger";
 import { listUnionKeywords, getCompareMatrix } from "../../db/app-compare";
 import { getOwnedAppById } from "../../db/owned-apps";
-import { normalizeCountry } from "../../domain/keywords/policy";
+import {
+  assertSupportedCountry,
+  normalizeCountry,
+} from "../../domain/keywords/policy";
+import { getProjectCountry } from "../../db/projects";
+
+function resolveCountryForProject(projectId: string): string {
+  const country = normalizeCountry(getProjectCountry(projectId));
+  assertSupportedCountry(country);
+  return country;
+}
 import {
   COMPARE_MAX_APPS,
   COMPARE_MAX_KEYWORDS,
@@ -53,9 +63,10 @@ function resolveApps(
 export function createCompareHandlers(deps: AsoRouteDeps) {
   function handleCompareKeywordsGet(
     res: http.ServerResponse,
-    query: Record<string, string>
+    query: Record<string, string>,
+    projectId: string
   ): void {
-    const country = normalizeCountry(query.country);
+    const country = resolveCountryForProject(projectId);
     const appIds = dedupe(parseAppIdsQueryParam(query.appIds));
 
     if (appIds.length < COMPARE_MIN_APPS) {
@@ -133,7 +144,8 @@ export function createCompareHandlers(deps: AsoRouteDeps) {
 
   async function handleCompareMatrixPost(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
+    projectId: string
   ): Promise<void> {
     const body = await deps.parseJsonBody<{
       appIds?: string[];
@@ -144,7 +156,7 @@ export function createCompareHandlers(deps: AsoRouteDeps) {
       return;
     }
 
-    const country = normalizeCountry(body.country);
+    const country = resolveCountryForProject(projectId);
     const appIds = dedupe(
       (body.appIds ?? [])
         .map((value) => (typeof value === "string" ? value.trim() : ""))

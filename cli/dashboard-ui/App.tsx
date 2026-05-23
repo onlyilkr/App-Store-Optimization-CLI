@@ -329,6 +329,8 @@ export function App() {
   const [projectManageOpen, setProjectManageOpen] = useState(false);
   const projectContext = useCurrentProject();
   const currentProjectId = projectContext.currentProject?.id ?? null;
+  const currentProjectCountry =
+    projectContext.currentProject?.country ?? DEFAULT_ASO_COUNTRY;
   const currentResearchAppId = currentProjectId
     ? researchAppIdForProject(currentProjectId)
     : DEFAULT_RESEARCH_APP_ID;
@@ -553,7 +555,7 @@ export function App() {
   const loadKeywords = useCallback(async (appId: string, requestedPage: number = 1) => {
     const requestId = ++keywordLoadRequestIdRef.current;
     const params = new URLSearchParams({
-      country: DEFAULT_ASO_COUNTRY,
+      country: currentProjectCountry,
       appId,
       page: String(Math.max(1, requestedPage)),
       pageSize: String(KEYWORDS_PAGE_SIZE),
@@ -623,6 +625,7 @@ export function App() {
     );
   }, [
     brandFilter,
+    currentProjectCountry,
     favoriteFilter,
     keywordFilter,
     maxDifficulty,
@@ -937,7 +940,7 @@ export function App() {
       await apiWrite("DELETE", "/api/aso/keywords", {
         appId: selectedAppId,
         keywords: selected,
-        country: DEFAULT_ASO_COUNTRY,
+        country: currentProjectCountry,
       });
       setSelectedKeywords(new Set());
       setSelectionAnchor(null);
@@ -964,7 +967,7 @@ export function App() {
           appId: selectedAppId,
           keyword: rowKeyword,
           isFavorite: nextIsFavorite,
-          country: DEFAULT_ASO_COUNTRY,
+          country: currentProjectCountry,
         });
         setKeywords((prev) =>
           prev.map((row) =>
@@ -984,7 +987,7 @@ export function App() {
         });
       }
     },
-    [keywordPage, loadKeywords, selectedAppId]
+    [currentProjectCountry, keywordPage, loadKeywords, selectedAppId]
   );
 
   const onDeleteSidebarApp = useCallback(
@@ -1214,7 +1217,7 @@ export function App() {
         await apiWrite("POST", "/api/aso/keywords", {
           appId: selectedAppId,
           keywords: kws,
-          country: DEFAULT_ASO_COUNTRY,
+          country: currentProjectCountry,
         });
         setAddInput("");
         setSuccessText("");
@@ -1237,6 +1240,7 @@ export function App() {
       }
     },
     [
+      currentProjectCountry,
       selectedAppId,
       keywordPage,
       loadApps,
@@ -1290,7 +1294,7 @@ export function App() {
         failedCount: number;
       }>("POST", "/api/aso/keywords/retry-failed", {
         appId: selectedAppId,
-        country: DEFAULT_ASO_COUNTRY,
+        country: currentProjectCountry,
       });
       await loadKeywords(selectedAppId, keywordPage);
       const retriedLabel = `Retried ${result.retriedCount} failed keyword${result.retriedCount === 1 ? "" : "s"}`;
@@ -1311,6 +1315,7 @@ export function App() {
       setLoadingText("");
     }
   }, [
+    currentProjectCountry,
     failedKeywordCount,
     keywordPage,
     loadKeywords,
@@ -1435,7 +1440,7 @@ export function App() {
     setTopAppsLoading(true);
     try {
       const data = await apiGet<KeywordDetails>(
-        `/api/aso/top-apps?country=${DEFAULT_ASO_COUNTRY}&keyword=${encodeURIComponent(rowKeyword)}&limit=${TOP_APPS_DIALOG_LIMIT}`
+        `/api/aso/top-apps?country=${currentProjectCountry}&keyword=${encodeURIComponent(rowKeyword)}&limit=${TOP_APPS_DIALOG_LIMIT}`
       );
       setTopAppsRows(buildTopAppRows(data));
     } catch (error) {
@@ -1453,7 +1458,7 @@ export function App() {
     setPositionHistoryLoading(true);
     try {
       const data = await apiGet<KeywordPositionHistoryPayload>(
-        `/api/aso/keywords/history?country=${DEFAULT_ASO_COUNTRY}&appId=${encodeURIComponent(
+        `/api/aso/keywords/history?country=${currentProjectCountry}&appId=${encodeURIComponent(
           selectedAppId
         )}&keyword=${encodeURIComponent(rowKeyword)}`
       );
@@ -2395,7 +2400,7 @@ export function App() {
               .filter((app) => app.kind === "owned")
               .map((app) => ({ id: app.id, name: app.name, icon: app.icon }))}
             currentAppId={selectedAppId}
-            country={DEFAULT_ASO_COUNTRY}
+            country={currentProjectCountry}
             initialKeywords={filteredRows.map((row) => row.keyword)}
             onExit={() => setCompareOpen(false)}
           />
@@ -2714,7 +2719,7 @@ export function App() {
                   {topAppsRows.map((app) => {
                     const iconUrl = getIconUrl(app);
                     const subtitle = app.subtitle?.trim();
-                    const appStoreUrl = buildAppStoreUrl(app.appId, DEFAULT_ASO_COUNTRY);
+                    const appStoreUrl = buildAppStoreUrl(app.appId, currentProjectCountry);
                     const releaseDate = formatCalendarDate(app.releaseDate, displayLocale) || "-";
                     const lastUpdateDate =
                       formatCalendarDate(app.currentVersionReleaseDate, displayLocale) || "-";

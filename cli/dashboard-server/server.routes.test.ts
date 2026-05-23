@@ -1564,6 +1564,64 @@ describe("dashboard server routes", () => {
     expect(notFoundApi.text).toContain("Not found");
   });
 
+  it("DELETE /api/aso/keywords?projectId=<tr-project> uses TR country, ignoring UI-sent US", async () => {
+    mockGetProjectById.mockImplementation((id: string) =>
+      id === "tr-test-99"
+        ? ({ id: "tr-test-99", name: "TR-Test-99", country: "TR" } as any)
+        : null
+    );
+    mockGetProjectCountry.mockImplementation((id: string) =>
+      (id === "tr-test-99" ? "TR" : "US") as any
+    );
+    mockDeleteAppKeywords.mockReturnValue(1);
+
+    const response = await request({
+      method: "DELETE",
+      path: "/api/aso/keywords?projectId=tr-test-99",
+      // UI deliberately sends country=US to verify the server overrides it.
+      body: { appId: "app-1", country: "US", keywords: ["term"] },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mockGetProjectCountry).toHaveBeenCalledWith("tr-test-99");
+    expect(mockDeleteAppKeywords).toHaveBeenCalledWith(
+      "app-1",
+      ["term"],
+      "TR"
+    );
+  });
+
+  it("POST /api/aso/keywords/favorite?projectId=<tr-project> uses TR country, ignoring UI-sent US", async () => {
+    mockGetProjectById.mockImplementation((id: string) =>
+      id === "tr-test-99"
+        ? ({ id: "tr-test-99", name: "TR-Test-99", country: "TR" } as any)
+        : null
+    );
+    mockGetProjectCountry.mockImplementation((id: string) =>
+      (id === "tr-test-99" ? "TR" : "US") as any
+    );
+    mockSetAppKeywordFavorite.mockReturnValue(true);
+
+    const response = await request({
+      method: "POST",
+      path: "/api/aso/keywords/favorite?projectId=tr-test-99",
+      body: {
+        appId: "app-1",
+        country: "US",
+        keyword: "term",
+        isFavorite: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mockSetAppKeywordFavorite).toHaveBeenCalledWith(
+      "app-1",
+      "term",
+      true,
+      "TR"
+    );
+  });
+
   it("POST /api/apps?projectId=<tr-project> hydrates with TR storefront", async () => {
     mockGetProjectById.mockImplementation((id: string) =>
       id === "tr-test-12"
