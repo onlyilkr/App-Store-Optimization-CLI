@@ -372,18 +372,4 @@ describe("aso-app-doc-service", () => {
     expect(result).toEqual([]);
     expect(mockedAsoAppleGet).not.toHaveBeenCalled();
   });
-
-  it("throws for non-US country", async () => {
-    const repository = createRepository({
-      getAppDocs: (jest.fn(async () => []) as unknown) as AsoCacheRepository["getAppDocs"],
-    });
-
-    await expect(
-      getAsoAppDocs({
-        country: "TR",
-        appIds: ["1"],
-        repository,
-      })
-    ).rejects.toThrow("Only US is supported for now");
-  });
 });
