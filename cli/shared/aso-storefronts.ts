@@ -1,16 +1,25 @@
 export const SUPPORTED_COUNTRIES = ["US", "TR", "DE", "GB", "FR", "IT"] as const;
 export type SupportedCountry = (typeof SUPPORTED_COUNTRIES)[number];
 
-export const DEFAULT_SUPPORTED_COUNTRY: SupportedCountry = "US";
-
 export type StorefrontConfig = {
   country: SupportedCountry;
   storefrontId: number;
   appStoreUrlSegment: string;
   acceptLanguage: string;
+  /**
+   * Apple's `dslang` cookie value (region-language). Used in the
+   * `Cookie: dslang=<value>` header for App Store HTML scraping.
+   */
   dslangCookie: string;
 };
 
+// Apple App Store storefront identifiers. The storefront ID is the value Apple
+// puts in the `X-Apple-Store-Front` HTTP header and the Search Ads
+// `storefronts` request field. Apple does not publish this table officially;
+// the canonical community reference is:
+//   https://gist.github.com/daktak/f887352d564b54f9e529404cc0eb60d5
+// Verified 2026-05 by issuing a `lookup?country=<cc>` against the iTunes API
+// for each entry and confirming results returned localized content.
 const CONFIGS: Record<SupportedCountry, StorefrontConfig> = {
   US: {
     country: "US",
@@ -60,10 +69,6 @@ export function isSupportedCountry(input: string): input is SupportedCountry {
   return (SUPPORTED_COUNTRIES as readonly string[]).includes(input.toUpperCase());
 }
 
-export function listSupportedCountries(): SupportedCountry[] {
-  return [...SUPPORTED_COUNTRIES];
-}
-
 export function getStorefrontConfig(country: string): StorefrontConfig {
   const normalized = country.toUpperCase();
   if (!isSupportedCountry(normalized)) {
@@ -72,11 +77,10 @@ export function getStorefrontConfig(country: string): StorefrontConfig {
   return CONFIGS[normalized];
 }
 
-export function getStorefrontIdForCountry(country: string): number {
-  return getStorefrontConfig(country).storefrontId;
+export function getAppStoreUrlSegment(country: string): string {
+  return getStorefrontConfig(country).appStoreUrlSegment;
 }
 
-export function getAppStoreSearchUrl(country: string): string {
-  const segment = getStorefrontConfig(country).appStoreUrlSegment;
-  return `https://apps.apple.com/${segment}/iphone/search`;
+export function getAppStoreDslangCookieHeader(country: string): string {
+  return `dslang=${getStorefrontConfig(country).dslangCookie}`;
 }
