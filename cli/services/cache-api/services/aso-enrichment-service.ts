@@ -306,11 +306,14 @@ function getStoreFrontHeader(country: string): string {
   return `${config.storefrontId}-1,${MZSEARCH_PLATFORM_ID_JSON}`;
 }
 
+function getAppStoreSearchUrl(country: string): string {
+  return `https://apps.apple.com/${getAppStoreUrlSegment(country)}/iphone/search`;
+}
+
 async function fetchPopularityOrderedIds(params: {
   keyword: string;
   country: string;
 }): Promise<string[]> {
-  const storefront = getStorefrontConfig(params.country);
   const response = await asoAppleGet<MzSearchResponse>(
     MZSEARCH_ORDER_URL,
     {
@@ -321,7 +324,7 @@ async function fetchPopularityOrderedIds(params: {
       },
       headers: {
         "User-Agent": ASO_APPLE_WEB_USER_AGENT,
-        "Accept-Language": storefront.acceptLanguage,
+        "Accept-Language": getStorefrontConfig(params.country).acceptLanguage,
         Cookie: getAppStoreDslangCookieHeader(params.country),
         "x-apple-store-front": getStoreFrontHeader(params.country),
       },
@@ -425,15 +428,13 @@ async function fetchSearchPageOrderedData(params: {
   orderedAppIds: string[];
   appDocs: AsoAppDoc[];
 }> {
-  const storefront = getStorefrontConfig(params.country);
-  const searchUrl = `https://apps.apple.com/${getAppStoreUrlSegment(params.country)}/iphone/search`;
-  const response = await asoAppleGet(searchUrl, {
+  const response = await asoAppleGet(getAppStoreSearchUrl(params.country), {
     operation: "appstore.search-page",
     params: { term: params.keyword },
     headers: {
       "User-Agent": ASO_APPLE_WEB_USER_AGENT,
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": storefront.acceptLanguage,
+      "Accept-Language": getStorefrontConfig(params.country).acceptLanguage,
     },
     timeout: 30000,
   });
@@ -516,7 +517,7 @@ export async function refreshKeywordOrder(params: {
     reportAppleContractChange({
       provider: "apple-appstore",
       operation: "appstore.search-page",
-      endpoint: `https://apps.apple.com/${getAppStoreUrlSegment(country)}/iphone/search`,
+      endpoint: getAppStoreSearchUrl(country),
       expectedContract:
         "Search page includes serialized-server-data with ordered app ids",
       actualSignal: htmlMessage,
@@ -899,7 +900,7 @@ export async function enrichKeyword(
     reportAppleContractChange({
       provider: "apple-appstore",
       operation: "appstore.search-page",
-      endpoint: `https://apps.apple.com/${getAppStoreUrlSegment(country)}/iphone/search`,
+      endpoint: getAppStoreSearchUrl(country),
       expectedContract:
         "Search page includes serialized-server-data with ordered app ids and lockups",
       actualSignal: htmlMessage,
@@ -1168,6 +1169,5 @@ export async function enrichKeyword(
 
 export const __testing__ = {
   getStoreFrontHeader,
-  composeSearchUrl: (country: string) =>
-    `https://apps.apple.com/${getAppStoreUrlSegment(country)}/iphone/search`,
+  getAppStoreSearchUrl,
 };

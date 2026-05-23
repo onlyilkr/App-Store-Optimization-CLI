@@ -1048,8 +1048,8 @@ describe("aso-enrichment-service storefront resolution", () => {
     expect(__testing__.getStoreFrontHeader("TR")).toBe("143480-1,29");
   });
 
-  it("composes /de/ url segment when country=DE", () => {
-    expect(__testing__.composeSearchUrl("DE")).toBe(
+  it("uses /de/ url segment when country=DE", () => {
+    expect(__testing__.getAppStoreSearchUrl("DE")).toBe(
       "https://apps.apple.com/de/iphone/search"
     );
   });
