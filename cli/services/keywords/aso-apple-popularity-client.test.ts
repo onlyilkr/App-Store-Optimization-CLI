@@ -218,4 +218,25 @@ describe("requestPopularitiesWithKwsRetry country threading", () => {
       { name: "b", popularity: null },
     ]);
   });
+
+  it("keeps existing retry behavior when treatNoOrgAsNull is omitted (defaults to false)", async () => {
+    // existing US-style retry-on-no-org behavior. Apple returns 403, the loop should treat
+    // it as retryable (matches isTransientStatus). Exhaust attempts and return the 403.
+    (mockPost as any).mockResolvedValue({
+      status: 403,
+      data: {
+        error: { errors: [{ messageCode: "KWS_NO_ORG_CONTENT_PROVIDERS" }] },
+      },
+      headers: {},
+    });
+    const result = await requestPopularitiesWithKwsRetry(
+      ["a"],
+      "cookie",
+      "100",
+      "US",
+      { maxAttempts: 2 }
+    );
+    expect(result.statusCode).toBe(403);
+    expect(result.data.data).toBeUndefined();
+  });
 });
