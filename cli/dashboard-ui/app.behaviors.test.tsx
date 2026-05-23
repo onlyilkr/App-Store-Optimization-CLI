@@ -276,6 +276,7 @@ function buildFetchMock(params: {
             id: "default",
             name: "Default",
             color: "slate",
+            country: "US",
             createdAt: "2024-01-01T00:00:00.000Z",
             updatedAt: "2024-01-01T00:00:00.000Z",
             appCount: 0,

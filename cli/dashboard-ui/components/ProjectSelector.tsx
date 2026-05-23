@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ProjectColor, ProjectSummary } from "../../shared/project-types";
 import { cx } from "../ui-react/primitives";
+import { COUNTRY_FLAG } from "./CountrySelector";
 
 type ProjectSelectorProps = {
   projects: ProjectSummary[];
@@ -55,6 +56,11 @@ export function ProjectSelector({
           className={cx("project-color-dot", `project-color-${color}`)}
           aria-hidden="true"
         />
+        {currentProject ? (
+          <span className="project-flag" aria-hidden="true">
+            {COUNTRY_FLAG[currentProject.country]}
+          </span>
+        ) : null}
         <span className="project-selector-name">{label}</span>
         <span className="project-selector-caret" aria-hidden="true">
           ▾
@@ -87,6 +93,9 @@ export function ProjectSelector({
                     )}
                     aria-hidden="true"
                   />
+                  <span className="project-flag" aria-hidden="true">
+                    {COUNTRY_FLAG[project.country]}
+                  </span>
                   <span className="project-selector-option-name">
                     {project.name}
                   </span>

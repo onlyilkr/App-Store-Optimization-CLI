@@ -6,6 +6,8 @@ import {
   type ProjectColor,
   type ProjectSummary,
 } from "../../shared/project-types";
+import type { SupportedCountry } from "../../shared/aso-storefronts";
+import { CountrySelector } from "./CountrySelector";
 
 type ProjectManageDialogProps = {
   open: boolean;
@@ -14,7 +16,7 @@ type ProjectManageDialogProps = {
   onClose: () => void;
   onUpdate: (
     projectId: string,
-    patch: { name?: string; color?: ProjectColor }
+    patch: { name?: string; color?: ProjectColor; country?: SupportedCountry }
   ) => Promise<void>;
   onDelete: (projectId: string) => Promise<void>;
 };
@@ -177,6 +179,12 @@ export function ProjectManageDialog({
                   />
                 ))}
               </div>
+              <CountrySelector
+                id={`project-country-${project.id}`}
+                value={project.country}
+                onChange={(country) => void onUpdate(project.id, { country })}
+                disabled={isBusy === project.id}
+              />
               <Button
                 type="button"
                 variant="ghost"
