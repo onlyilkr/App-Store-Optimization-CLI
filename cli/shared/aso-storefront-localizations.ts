@@ -17,16 +17,28 @@ export const ASO_STOREFRONT_LANGUAGES_BY_COUNTRY: Record<
   US: {
     defaultLanguage: "en-US",
     additionalLanguages: [
-      "ar",
-      "zh-Hans",
-      "zh-Hant",
-      "fr-FR",
-      "ko-KR",
-      "pt-BR",
-      "ru-RU",
-      "es-MX",
-      "vi",
+      "ar", "zh-Hans", "zh-Hant", "fr-FR", "ko-KR", "pt-BR", "ru-RU", "es-MX", "vi",
     ],
+  },
+  TR: {
+    defaultLanguage: "tr",
+    additionalLanguages: ["en-US"],
+  },
+  DE: {
+    defaultLanguage: "de-DE",
+    additionalLanguages: ["en-GB", "en-US"],
+  },
+  GB: {
+    defaultLanguage: "en-GB",
+    additionalLanguages: ["en-US"],
+  },
+  FR: {
+    defaultLanguage: "fr-FR",
+    additionalLanguages: ["en-GB", "en-US"],
+  },
+  IT: {
+    defaultLanguage: "it",
+    additionalLanguages: ["en-GB", "en-US"],
   },
 };
 
