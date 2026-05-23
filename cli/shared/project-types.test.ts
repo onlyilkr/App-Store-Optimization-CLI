@@ -6,6 +6,7 @@ import {
   PROJECT_NAME_MAX_LENGTH,
   ensureUniqueSlug,
   isValidProjectColor,
+  isValidProjectCountry,
   slugifyProjectName,
   validateProjectName,
 } from "./project-types";
@@ -111,5 +112,15 @@ describe("project-types helpers", () => {
       const existing = new Set(["halal-food", "halal-food-2"]);
       expect(ensureUniqueSlug("halal-food", existing)).toBe("halal-food-3");
     });
+  });
+});
+
+describe("isValidProjectCountry", () => {
+  it.each(["US", "TR", "de", "gb"])("accepts %s", (c) => {
+    expect(isValidProjectCountry(c)).toBe(true);
+  });
+
+  it.each(["ZZ", "", 42, null, undefined])("rejects %s", (c) => {
+    expect(isValidProjectCountry(c)).toBe(false);
   });
 });

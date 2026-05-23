@@ -1,3 +1,8 @@
+import {
+  isSupportedCountry,
+  type SupportedCountry,
+} from "./aso-storefronts";
+
 export const DEFAULT_PROJECT_ID = "default";
 export const DEFAULT_PROJECT_NAME = "Default";
 
@@ -16,10 +21,15 @@ export type ProjectColor = (typeof PROJECT_COLORS)[number];
 
 export const DEFAULT_PROJECT_COLOR: ProjectColor = "slate";
 
+export type ProjectCountry = SupportedCountry;
+
+export const DEFAULT_PROJECT_COUNTRY: ProjectCountry = "US";
+
 export type Project = {
   id: string;
   name: string;
   color: ProjectColor;
+  country: ProjectCountry;
   createdAt: string;
   updatedAt: string;
 };
@@ -32,11 +42,13 @@ export type ProjectSummary = Project & {
 export type ProjectCreateRequest = {
   name: string;
   color?: ProjectColor;
+  country?: ProjectCountry;
 };
 
 export type ProjectUpdateRequest = {
   name?: string;
   color?: ProjectColor;
+  country?: ProjectCountry;
 };
 
 export const PROJECT_NAME_MIN_LENGTH = 1;
@@ -48,6 +60,10 @@ export function isValidProjectColor(value: unknown): value is ProjectColor {
     typeof value === "string" &&
     (PROJECT_COLORS as readonly string[]).includes(value)
   );
+}
+
+export function isValidProjectCountry(value: unknown): value is ProjectCountry {
+  return typeof value === "string" && isSupportedCountry(value);
 }
 
 export type ProjectNameValidation =
