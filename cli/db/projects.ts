@@ -1,13 +1,16 @@
 import { getDb } from "./store";
 import {
   DEFAULT_PROJECT_COLOR,
+  DEFAULT_PROJECT_COUNTRY,
   DEFAULT_PROJECT_ID,
   PROJECT_COLORS,
   ensureUniqueSlug,
+  isValidProjectCountry,
   slugifyProjectName,
   validateProjectName,
   type Project,
   type ProjectColor,
+  type ProjectCountry,
   type ProjectSummary,
 } from "../shared/project-types";
 import {
@@ -19,9 +22,16 @@ type ProjectRow = {
   id: string;
   name: string;
   color: string;
+  country: string;
   created_at: string;
   updated_at: string;
 };
+
+function normalizeCountryForStorage(value: unknown): ProjectCountry {
+  return isValidProjectCountry(value)
+    ? (value.toUpperCase() as ProjectCountry)
+    : DEFAULT_PROJECT_COUNTRY;
+}
 
 function toProject(row: ProjectRow): Project {
   const color = (PROJECT_COLORS as readonly string[]).includes(row.color)
@@ -31,6 +41,7 @@ function toProject(row: ProjectRow): Project {
     id: row.id,
     name: row.name,
     color,
+    country: normalizeCountryForStorage(row.country),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -49,7 +60,7 @@ export function listProjects(): Project[] {
   const db = getDb();
   const rows = db
     .prepare(
-      `SELECT id, name, color, created_at, updated_at
+      `SELECT id, name, color, country, created_at, updated_at
        FROM projects
        ORDER BY created_at ASC, id ASC`
     )
@@ -65,6 +76,7 @@ export function listProjectSummaries(): ProjectSummary[] {
          p.id,
          p.name,
          p.color,
+         p.country,
          p.created_at,
          p.updated_at,
          (SELECT COUNT(*) FROM owned_app_project_memberships m
@@ -88,7 +100,7 @@ export function getProjectById(id: string): Project | null {
   const db = getDb();
   const row = db
     .prepare(
-      `SELECT id, name, color, created_at, updated_at
+      `SELECT id, name, color, country, created_at, updated_at
        FROM projects WHERE id = ?`
     )
     .get(id) as ProjectRow | undefined;
@@ -99,7 +111,7 @@ export function getProjectByName(name: string): Project | null {
   const db = getDb();
   const row = db
     .prepare(
-      `SELECT id, name, color, created_at, updated_at
+      `SELECT id, name, color, country, created_at, updated_at
        FROM projects WHERE LOWER(name) = LOWER(?)`
     )
     .get(name.trim()) as ProjectRow | undefined;
@@ -136,6 +148,7 @@ export function getProjectCounts(id: string): {
 export function createProject(input: {
   name: string;
   color?: ProjectColor;
+  country?: ProjectCountry;
 }): Project {
   const validation = validateProjectName(input.name);
   if (!validation.ok) {
@@ -155,6 +168,7 @@ export function createProject(input: {
     );
   }
   const color: ProjectColor = input.color ?? DEFAULT_PROJECT_COLOR;
+  const country = normalizeCountryForStorage(input.country);
   const desiredSlug = slugifyProjectName(name);
   const existing = listProjects().map((project) => project.id);
   const id = ensureUniqueSlug(desiredSlug, existing);
@@ -163,9 +177,9 @@ export function createProject(input: {
   const researchAppId = researchAppIdForProject(id);
   const tx = db.transaction(() => {
     db.prepare(
-      `INSERT INTO projects (id, name, color, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`
-    ).run(id, name, color, now, now);
+      `INSERT INTO projects (id, name, color, country, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(id, name, color, country, now, now);
     db.prepare(
       `INSERT OR IGNORE INTO owned_apps (id, kind, name, icon_json, project_id)
        VALUES (?, 'research', ?, NULL, ?)`
@@ -188,7 +202,7 @@ export function createProject(input: {
 
 export function updateProject(
   id: string,
-  patch: { name?: string; color?: ProjectColor }
+  patch: { name?: string; color?: ProjectColor; country?: ProjectCountry }
 ): Project | null {
   const existing = getProjectById(id);
   if (!existing) return null;
@@ -213,13 +227,17 @@ export function updateProject(
     }
   }
   const color = patch.color ?? existing.color;
+  const country =
+    patch.country !== undefined
+      ? normalizeCountryForStorage(patch.country)
+      : existing.country;
   const now = new Date().toISOString();
   const db = getDb();
   db.prepare(
     `UPDATE projects
-     SET name = ?, color = ?, updated_at = ?
+     SET name = ?, color = ?, country = ?, updated_at = ?
      WHERE id = ?`
-  ).run(resolvedName, color, now, id);
+  ).run(resolvedName, color, country, now, id);
   return getProjectById(id);
 }
 
@@ -278,4 +296,9 @@ export function deleteProject(id: string): {
 
 export function isDefaultProject(id: string): boolean {
   return id === DEFAULT_PROJECT_ID;
+}
+
+export function getProjectCountry(id: string): ProjectCountry {
+  const project = getProjectById(id);
+  return project?.country ?? DEFAULT_PROJECT_COUNTRY;
 }

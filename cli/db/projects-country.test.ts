@@ -2,6 +2,12 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import { getDb, resetDbForTests } from "./store";
+import {
+  createProject,
+  getProjectById,
+  listProjectSummaries,
+  updateProject,
+} from "./projects";
 
 function withTempDb<T>(fn: () => T): T {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aso-db-test-"));
@@ -37,6 +43,41 @@ describe("projects.country migration", () => {
       const db = getDb();
       const row = db.prepare(`SELECT country FROM projects WHERE id = 'default'`).get() as { country: string };
       expect(row.country).toBe("US");
+    });
+  });
+});
+
+describe("projects CRUD with country", () => {
+  it("createProject persists explicit country", () => {
+    withTempDb(() => {
+      const project = createProject({ name: "Altın TR", country: "TR" });
+      expect(project.country).toBe("TR");
+      const reloaded = getProjectById(project.id);
+      expect(reloaded?.country).toBe("TR");
+    });
+  });
+
+  it("createProject defaults to US when country omitted", () => {
+    withTempDb(() => {
+      const project = createProject({ name: "Default-ish" });
+      expect(project.country).toBe("US");
+    });
+  });
+
+  it("updateProject changes country", () => {
+    withTempDb(() => {
+      const project = createProject({ name: "Switch", country: "US" });
+      const updated = updateProject(project.id, { country: "DE" });
+      expect(updated?.country).toBe("DE");
+    });
+  });
+
+  it("listProjectSummaries includes country", () => {
+    withTempDb(() => {
+      createProject({ name: "X-FR", country: "FR" });
+      const summaries = listProjectSummaries();
+      const fr = summaries.find((s) => s.name === "X-FR");
+      expect(fr?.country).toBe("FR");
     });
   });
 });
