@@ -428,10 +428,12 @@ export class KeywordPipelineService {
       const popularityResult =
         options?.allowInteractiveAuthRecovery === false
           ? await asoPopularityService.fetchKeywordPopularitiesWithFailures(
+              country,
               classified.popularityFetchKeywords,
               { allowInteractiveAuthRecovery: false }
             )
           : await asoPopularityService.fetchKeywordPopularitiesWithFailures(
+              country,
               classified.popularityFetchKeywords
             );
       const fetchedPopularityItems = classified.popularityFetchKeywords

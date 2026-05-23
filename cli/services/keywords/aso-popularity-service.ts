@@ -134,12 +134,14 @@ function logPopularityResponse(
 
 export class AsoPopularityService {
   async fetchKeywordPopularitiesWithFailures(
+    country: string,
     keywords: string[],
     options?: FetchKeywordPopularitiesOptions
   ): Promise<KeywordPopularityResult> {
     if (keywords.length > ASO_MAX_KEYWORDS) {
       throw new ContextualError(ASO_MAX_KEYWORDS_PER_CALL_ERROR);
     }
+    const treatNoOrgAsNull = country.toUpperCase() !== "US";
 
     const sanitizedToOriginal = new Map<string, string>();
     for (const keyword of keywords) {
@@ -187,8 +189,8 @@ export class AsoPopularityService {
         terms,
         cookieHeader,
         adamId,
-        "US", // TODO Task 10: thread real country from caller
-        options
+        country,
+        { ...(options ?? {}), treatNoOrgAsNull }
       );
       logPopularityResponse(stageLabel, response.statusCode, response.data);
 
@@ -206,8 +208,8 @@ export class AsoPopularityService {
           terms,
           cookieHeader,
           adamId,
-          "US", // TODO Task 10: thread real country from caller
-          options
+          country,
+          { ...(options ?? {}), treatNoOrgAsNull }
         );
         logPopularityResponse(
           `${stageLabel}-post-reauth`,
@@ -404,10 +406,12 @@ export class AsoPopularityService {
   }
 
   async fetchKeywordPopularities(
+    country: string,
     keywords: string[],
     options?: FetchKeywordPopularitiesOptions
   ): Promise<Record<string, number>> {
     const result = await this.fetchKeywordPopularitiesWithFailures(
+      country,
       keywords,
       options
     );

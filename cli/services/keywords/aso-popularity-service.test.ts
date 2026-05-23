@@ -36,19 +36,19 @@ describe("AsoPopularityService", () => {
     it("throws when more than 100 keywords", async () => {
       const many = Array.from({ length: 101 }, (_, i) => `kw${i}`);
       await expect(
-        asoPopularityService.fetchKeywordPopularities(many)
+        asoPopularityService.fetchKeywordPopularities("US", many)
       ).rejects.toThrow("A maximum of 100 keywords is supported per call");
       expect(mockRequestPopularitiesWithKwsRetry).not.toHaveBeenCalled();
     });
 
     it("returns empty object for empty keywords", async () => {
-      const result = await asoPopularityService.fetchKeywordPopularities([]);
+      const result = await asoPopularityService.fetchKeywordPopularities("US", []);
       expect(result).toEqual({});
       expect(mockRequestPopularitiesWithKwsRetry).not.toHaveBeenCalled();
     });
 
     it("returns empty object when all keywords are whitespace", async () => {
-      const result = await asoPopularityService.fetchKeywordPopularities([
+      const result = await asoPopularityService.fetchKeywordPopularities("US", [
         "  ",
         " ",
         "",
@@ -70,7 +70,7 @@ describe("AsoPopularityService", () => {
         },
       });
 
-      const result = await asoPopularityService.fetchKeywordPopularities([
+      const result = await asoPopularityService.fetchKeywordPopularities("US", [
         "Keyword",
         "ANOTHER",
       ]);
@@ -81,7 +81,7 @@ describe("AsoPopularityService", () => {
         "cookie=value",
         expect.any(String),
         "US",
-        undefined
+        { treatNoOrgAsNull: false }
       );
       expect(asoAuthService.getCookieHeader).toHaveBeenCalledWith(
         "https://app-ads.apple.com/cm/api/v2/keywords/popularities"
@@ -102,7 +102,7 @@ describe("AsoPopularityService", () => {
         },
       });
 
-      const result = await asoPopularityService.fetchKeywordPopularities([
+      const result = await asoPopularityService.fetchKeywordPopularities("US", [
         "a",
         "b",
         "c",
@@ -119,7 +119,7 @@ describe("AsoPopularityService", () => {
       });
 
       await expect(
-        asoPopularityService.fetchKeywordPopularities(["test"])
+        asoPopularityService.fetchKeywordPopularities("US", ["test"])
       ).rejects.toThrow("Popularity API request failed with status 500");
     });
 
@@ -127,7 +127,7 @@ describe("AsoPopularityService", () => {
       jest.mocked(getConfiguredAsoAdamId).mockReturnValue(null);
 
       await expect(
-        asoPopularityService.fetchKeywordPopularities(["test"])
+        asoPopularityService.fetchKeywordPopularities("US", ["test"])
       ).rejects.toThrow("Primary App ID is missing.");
       expect(mockRequestPopularitiesWithKwsRetry).not.toHaveBeenCalled();
     });
@@ -140,7 +140,7 @@ describe("AsoPopularityService", () => {
       });
 
       await expect(
-        asoPopularityService.fetchKeywordPopularities(["test"])
+        asoPopularityService.fetchKeywordPopularities("US", ["test"])
       ).rejects.toThrow("Popularity API request failed with status 200");
     });
 
@@ -153,7 +153,7 @@ describe("AsoPopularityService", () => {
         data: { status: "success", data: [{ name: "x", popularity: 1 }] },
       });
 
-      const result = await asoPopularityService.fetchKeywordPopularities(["x"]);
+      const result = await asoPopularityService.fetchKeywordPopularities("US", ["x"]);
 
       expect(asoAuthService.reAuthenticate).toHaveBeenCalledTimes(1);
       expect(result).toEqual({ x: 1 });
@@ -162,7 +162,7 @@ describe("AsoPopularityService", () => {
         "new-cookie",
         expect.any(String),
         "US",
-        undefined
+        { treatNoOrgAsNull: false }
       );
     });
 
@@ -170,7 +170,7 @@ describe("AsoPopularityService", () => {
       jest.mocked(asoAuthService.getCookieHeader).mockReturnValue("");
 
       await expect(
-        asoPopularityService.fetchKeywordPopularities(["x"], {
+        asoPopularityService.fetchKeywordPopularities("US", ["x"], {
           allowInteractiveAuthRecovery: false,
         })
       ).rejects.toMatchObject({ code: "ASO_AUTH_REAUTH_REQUIRED" });
@@ -194,7 +194,7 @@ describe("AsoPopularityService", () => {
         "refreshed-cookie"
       );
 
-      const result = await asoPopularityService.fetchKeywordPopularities(["y"]);
+      const result = await asoPopularityService.fetchKeywordPopularities("US", ["y"]);
 
       expect(asoAuthService.reAuthenticate).toHaveBeenCalledTimes(1);
       expect(mockRequestPopularitiesWithKwsRetry).toHaveBeenCalledTimes(2);
@@ -218,7 +218,7 @@ describe("AsoPopularityService", () => {
       );
 
       await expect(
-        asoPopularityService.fetchKeywordPopularities(["y"])
+        asoPopularityService.fetchKeywordPopularities("US", ["y"])
       ).rejects.toThrow("Popularity API request failed with status 401");
 
       expect(asoAuthService.reAuthenticate).toHaveBeenCalledTimes(1);
@@ -233,7 +233,7 @@ describe("AsoPopularityService", () => {
       });
 
       await expect(
-        asoPopularityService.fetchKeywordPopularities(["y"], {
+        asoPopularityService.fetchKeywordPopularities("US", ["y"], {
           allowInteractiveAuthRecovery: false,
         })
       ).rejects.toMatchObject({ code: "ASO_AUTH_REAUTH_REQUIRED" });
@@ -259,7 +259,7 @@ describe("AsoPopularityService", () => {
       });
 
       await expect(
-        asoPopularityService.fetchKeywordPopularities(["z"])
+        asoPopularityService.fetchKeywordPopularities("US", ["z"])
       ).rejects.toThrow("No org content providers");
       expect(asoAuthService.reAuthenticate).not.toHaveBeenCalled();
     });
@@ -282,7 +282,7 @@ describe("AsoPopularityService", () => {
       });
 
       await expect(
-        asoPopularityService.fetchKeywordPopularities(["z"])
+        asoPopularityService.fetchKeywordPopularities("US", ["z"])
       ).rejects.toThrow(
         "Primary App ID 1234567890 is not accessible for this Apple Ads account."
       );
@@ -306,7 +306,7 @@ describe("AsoPopularityService", () => {
       });
 
       await expect(
-        asoPopularityService.fetchKeywordPopularities(["z"])
+        asoPopularityService.fetchKeywordPopularities("US", ["z"])
       ).rejects.toThrow(
         "Primary App ID 1234567890 is not accessible for this Apple Ads account."
       );
@@ -332,10 +332,10 @@ describe("AsoPopularityService", () => {
           data: { status: "error" },
         });
 
-      const result = await asoPopularityService.fetchKeywordPopularitiesWithFailures([
-        "good",
-        "bad",
-      ]);
+      const result = await asoPopularityService.fetchKeywordPopularitiesWithFailures(
+        "US",
+        ["good", "bad"]
+      );
 
       expect(result.popularities).toEqual({ good: 25 });
       expect(result.failedKeywords).toHaveLength(1);
@@ -349,7 +349,7 @@ describe("AsoPopularityService", () => {
         "cookie=value",
         expect.any(String),
         "US",
-        { maxAttempts: 1 }
+        { maxAttempts: 1, treatNoOrgAsNull: false }
       );
       expect(mockRequestPopularitiesWithKwsRetry).toHaveBeenNthCalledWith(
         3,
@@ -357,8 +357,119 @@ describe("AsoPopularityService", () => {
         "cookie=value",
         expect.any(String),
         "US",
-        { maxAttempts: 1 }
+        { maxAttempts: 1, treatNoOrgAsNull: false }
       );
     });
+
+    it("forwards country='TR' to popularity client with treatNoOrgAsNull=true", async () => {
+      mockRequestPopularitiesWithKwsRetry.mockResolvedValue({
+        statusCode: 200,
+        attempts: 1,
+        data: {
+          status: "success",
+          data: [{ name: "kw", popularity: 7 }],
+        },
+      });
+
+      const result = await asoPopularityService.fetchKeywordPopularitiesWithFailures(
+        "TR",
+        ["kw"]
+      );
+
+      expect(result.popularities).toEqual({ kw: 7 });
+      expect(result.failedKeywords).toEqual([]);
+      expect(mockRequestPopularitiesWithKwsRetry).toHaveBeenCalledWith(
+        ["kw"],
+        "cookie=value",
+        expect.any(String),
+        "TR",
+        { treatNoOrgAsNull: true }
+      );
+    });
+
+    it("forwards lowercase 'us' as treatNoOrgAsNull=false (US match is case-insensitive)", async () => {
+      mockRequestPopularitiesWithKwsRetry.mockResolvedValue({
+        statusCode: 200,
+        attempts: 1,
+        data: {
+          status: "success",
+          data: [{ name: "kw", popularity: 5 }],
+        },
+      });
+
+      await asoPopularityService.fetchKeywordPopularitiesWithFailures("us", ["kw"]);
+
+      expect(mockRequestPopularitiesWithKwsRetry).toHaveBeenCalledWith(
+        ["kw"],
+        "cookie=value",
+        expect.any(String),
+        "us",
+        { treatNoOrgAsNull: false }
+      );
+    });
+  });
+});
+
+describe("AsoPopularityService country threading", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.mocked(asoAuthService.getCookieHeader).mockReturnValue("cookie=value");
+    jest.mocked(getConfiguredAsoAdamId).mockReturnValue("1234567890");
+  });
+
+  it("forwards country to popularity client and writes popularity:null when storefront lacks org access", async () => {
+    // Mock returns null popularity for all terms — simulates the treatNoOrgAsNull
+    // degraded path where the Apple API returns null instead of a numeric score
+    mockRequestPopularitiesWithKwsRetry.mockResolvedValue({
+      statusCode: 200,
+      attempts: 1,
+      data: {
+        status: "success",
+        data: [
+          { name: "uygulama", popularity: null },
+          { name: "oyun", popularity: null },
+        ],
+      },
+    });
+
+    const result = await asoPopularityService.fetchKeywordPopularitiesWithFailures(
+      "TR",
+      ["uygulama", "oyun"]
+    );
+
+    // Verify the client was called with TR country and treatNoOrgAsNull: true
+    expect(mockRequestPopularitiesWithKwsRetry).toHaveBeenCalledWith(
+      ["uygulama", "oyun"],
+      "cookie=value",
+      expect.any(String),
+      "TR",
+      { treatNoOrgAsNull: true }
+    );
+
+    // null popularity items are omitted from popularities map and do not
+    // produce failedKeywords — the null is the expected degraded signal
+    expect(result.popularities).toEqual({});
+    expect(result.failedKeywords).toHaveLength(0);
+  });
+
+  it("uses treatNoOrgAsNull=false when country is US (preserves loud failure)", async () => {
+    mockRequestPopularitiesWithKwsRetry.mockResolvedValue({
+      statusCode: 200,
+      attempts: 1,
+      data: {
+        status: "success",
+        data: [{ name: "game", popularity: 50 }],
+      },
+    });
+
+    await asoPopularityService.fetchKeywordPopularitiesWithFailures("US", ["game"]);
+
+    expect(mockRequestPopularitiesWithKwsRetry).toHaveBeenCalledWith(
+      ["game"],
+      "cookie=value",
+      expect.any(String),
+      "US",
+      { treatNoOrgAsNull: false }
+    );
   });
 });
