@@ -187,6 +187,7 @@ export class AsoPopularityService {
         terms,
         cookieHeader,
         adamId,
+        "US", // TODO Task 10: thread real country from caller
         options
       );
       logPopularityResponse(stageLabel, response.statusCode, response.data);
@@ -205,6 +206,7 @@ export class AsoPopularityService {
           terms,
           cookieHeader,
           adamId,
+          "US", // TODO Task 10: thread real country from caller
           options
         );
         logPopularityResponse(

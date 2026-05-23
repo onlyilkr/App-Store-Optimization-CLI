@@ -80,6 +80,7 @@ describe("AsoPopularityService", () => {
         ["keyword", "another"],
         "cookie=value",
         expect.any(String),
+        "US",
         undefined
       );
       expect(asoAuthService.getCookieHeader).toHaveBeenCalledWith(
@@ -160,6 +161,7 @@ describe("AsoPopularityService", () => {
         ["x"],
         "new-cookie",
         expect.any(String),
+        "US",
         undefined
       );
     });
@@ -346,6 +348,7 @@ describe("AsoPopularityService", () => {
         ["good"],
         "cookie=value",
         expect.any(String),
+        "US",
         { maxAttempts: 1 }
       );
       expect(mockRequestPopularitiesWithKwsRetry).toHaveBeenNthCalledWith(
@@ -353,6 +356,7 @@ describe("AsoPopularityService", () => {
         ["bad"],
         "cookie=value",
         expect.any(String),
+        "US",
         { maxAttempts: 1 }
       );
     });

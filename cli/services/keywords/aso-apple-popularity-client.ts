@@ -2,6 +2,7 @@ import axios from "axios";
 import { logger } from "../../utils/logger";
 import { getAsoResilienceConfig } from "../../shared/aso-resilience";
 import { getRetryDelayMs as getSharedRetryDelayMs } from "../../shared/aso-retry-delay";
+import { getStorefrontConfig } from "../../shared/aso-storefronts";
 import {
   isKnownTransientStatusCode,
   isRetryableTransientStatusCode,
@@ -59,15 +60,17 @@ function wait(ms: number): Promise<void> {
 async function requestPopularitiesOnce(
   terms: string[],
   cookieHeader: string,
-  adamId: string
+  adamId: string,
+  country: string
 ): Promise<{
   statusCode: number;
   data: PopularityResponse;
   headers?: Record<string, unknown>;
 }> {
   const requestUrl = `${APPLE_POPULARITY_URL}?adamId=${encodeURIComponent(adamId)}`;
+  const storefrontId = getStorefrontConfig(country).storefrontId;
   const requestBody = {
-    storefronts: [],
+    storefronts: [storefrontId],
     terms,
   };
   const requestHeaders = {
@@ -94,6 +97,7 @@ async function requestPopularitiesOnce(
       operation: "keywords-popularities-request",
       context: {
         adamId,
+        country,
         termsCount: terms.length,
       },
       isTerminal: false,
@@ -134,15 +138,43 @@ export async function requestPopularitiesWithKwsRetry(
   terms: string[],
   cookieHeader: string,
   adamId: string,
-  options?: { maxAttempts?: number }
+  country: string,
+  options?: { maxAttempts?: number; treatNoOrgAsNull?: boolean }
 ): Promise<{ statusCode: number; data: PopularityResponse; attempts: number }> {
   const maxAttempts = Math.max(
     1,
     options?.maxAttempts ?? getAsoResilienceConfig().maxAttempts
   );
+  const treatNoOrgAsNull = options?.treatNoOrgAsNull === true;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      const response = await requestPopularitiesOnce(terms, cookieHeader, adamId);
+      const response = await requestPopularitiesOnce(
+        terms,
+        cookieHeader,
+        adamId,
+        country
+      );
+
+      // Translate "no storefront access" 403 into all-null popularity if opted in.
+      // This keeps non-US storefronts useful (rank/difficulty still work) when the
+      // user's Apple Search Ads account has no org access in that country.
+      if (
+        treatNoOrgAsNull &&
+        isNoOrgContentProvidersError(response.statusCode, response.data)
+      ) {
+        logger.debug(
+          `[aso-popularity] storefront ${country} has no org content providers; returning null popularity for ${terms.length} terms`
+        );
+        return {
+          statusCode: 200,
+          data: {
+            status: "ok",
+            data: terms.map((name) => ({ name, popularity: null })),
+          },
+          attempts: attempt,
+        };
+      }
+
       const retryable = isTransientStatus(response.statusCode, response.data);
       if (!retryable || attempt >= maxAttempts) {
         return {
@@ -175,6 +207,7 @@ export async function requestPopularitiesWithKwsRetry(
           operation: "keywords-popularities-request",
           context: {
             adamId,
+            country,
             termsCount: terms.length,
             attempt,
             maxAttempts,

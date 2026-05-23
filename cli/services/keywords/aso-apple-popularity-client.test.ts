@@ -56,7 +56,7 @@ describe("aso-apple-popularity-client", () => {
         data: { status: "success", data: [{ name: "z", popularity: 9 }] },
       });
 
-    const promise = requestPopularitiesWithKwsRetry(["z"], "cookie=value", "adam");
+    const promise = requestPopularitiesWithKwsRetry(["z"], "cookie=value", "adam", "US");
     await jest.advanceTimersByTimeAsync(1000);
     const result = await promise;
 
@@ -85,7 +85,8 @@ describe("aso-apple-popularity-client", () => {
     const promise = requestPopularitiesWithKwsRetry(
       ["z"],
       "cookie=value",
-      "adam"
+      "adam",
+      "US"
     );
     await jest.advanceTimersByTimeAsync(1000);
     const result = await promise;
@@ -114,7 +115,7 @@ describe("aso-apple-popularity-client", () => {
         data: { status: "success", data: [{ name: "z", popularity: 7 }] },
       });
 
-    const promise = requestPopularitiesWithKwsRetry(["z"], "cookie=value", "adam");
+    const promise = requestPopularitiesWithKwsRetry(["z"], "cookie=value", "adam", "US");
     await jest.advanceTimersByTimeAsync(2000);
     const result = await promise;
 
@@ -134,7 +135,7 @@ describe("aso-apple-popularity-client", () => {
         data: { status: "success", data: [{ name: "z", popularity: 5 }] },
       });
 
-    const promise = requestPopularitiesWithKwsRetry(["z"], "cookie=value", "adam");
+    const promise = requestPopularitiesWithKwsRetry(["z"], "cookie=value", "adam", "US");
     await jest.advanceTimersByTimeAsync(1000);
     const result = await promise;
 
@@ -152,10 +153,69 @@ describe("aso-apple-popularity-client", () => {
       ["z"],
       "cookie=value",
       "adam",
+      "US",
       { maxAttempts: 1 }
     );
 
     expect(mockPost).toHaveBeenCalledTimes(1);
     expect(result.statusCode).toBe(503);
+  });
+});
+
+describe("requestPopularitiesWithKwsRetry country threading", () => {
+  beforeEach(() => (mockPost as any).mockReset());
+
+  it("posts storefronts: [143480] when country=TR", async () => {
+    (mockPost as any).mockResolvedValueOnce({
+      status: 200,
+      data: { data: [{ name: "altın", popularity: 12 }] },
+      headers: {},
+    });
+    await requestPopularitiesWithKwsRetry(
+      ["altın"],
+      "cookie",
+      "100",
+      "TR"
+    );
+    const body = (mockPost as any).mock.calls[0][1];
+    expect(body.storefronts).toEqual([143480]);
+  });
+
+  it("posts storefronts: [143441] when country=US (backward compat)", async () => {
+    (mockPost as any).mockResolvedValueOnce({
+      status: 200,
+      data: { data: [{ name: "test", popularity: 5 }] },
+      headers: {},
+    });
+    await requestPopularitiesWithKwsRetry(
+      ["test"],
+      "cookie",
+      "100",
+      "US"
+    );
+    const body = (mockPost as any).mock.calls[0][1];
+    expect(body.storefronts).toEqual([143441]);
+  });
+
+  it("returns popularity:null for all terms on KWS_NO_ORG_CONTENT_PROVIDERS when treatNoOrgAsNull=true", async () => {
+    (mockPost as any).mockResolvedValue({
+      status: 403,
+      data: {
+        error: { errors: [{ messageCode: "KWS_NO_ORG_CONTENT_PROVIDERS" }] },
+      },
+      headers: {},
+    });
+    const result = await requestPopularitiesWithKwsRetry(
+      ["a", "b"],
+      "cookie",
+      "100",
+      "TR",
+      { maxAttempts: 1, treatNoOrgAsNull: true }
+    );
+    expect(result.statusCode).toBe(200);
+    expect(result.data.data).toEqual([
+      { name: "a", popularity: null },
+      { name: "b", popularity: null },
+    ]);
   });
 });
