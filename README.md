@@ -19,7 +19,8 @@ Research ASO keywords, inspect competition, and manage results from one local-fi
 - Keyword scoring with popularity + difficulty + brand classification in one command
 - Local ASO dashboard for reviewing keyword/app data
 - Compare apps across keywords from the dashboard — pick multiple apps plus a keyword set and see a side-by-side rank matrix (including apps that don't currently track the keyword)
-- Projects (workspaces) to isolate apps and research keyword pools by category (e.g. gold tracker vs halal food scanner) — switch projects from the sidebar header with zero keyword bleed between contexts
+- **Projects (workspaces)** to isolate apps and research keyword pools by category (e.g. gold tracker vs halal food scanner) — switch projects from the sidebar header with zero keyword bleed between contexts
+- **Multi-storefront support** for 6 App Store regions: 🇺🇸 US, 🇹🇷 TR, 🇩🇪 DE, 🇬🇧 GB, 🇫🇷 FR, 🇮🇹 IT — each project is scoped to one storefront, so rank/difficulty data reflects the chosen country's App Store
 - MCP tool (`aso_evaluate_keywords`) for agent workflows and automated keyword research
 
 <h3 align="center">ASO Dashboard</h3>
@@ -185,8 +186,9 @@ Example MCP config:
 
 ## Current Scope
 
-- Storefront support: `US`
-- Multi-storefront support is planned
+- **Supported App Store storefronts:** `US`, `TR`, `DE`, `GB`, `FR`, `IT` — set per project from the dashboard (or via the `--country` flag in CLI)
+- Apple Search Ads popularity data is available wherever your Search Ads org has storefront access; missing-access cases degrade to `popularity = 0` so rank + difficulty still populate
+- Need another storefront? Open an issue — adding a new country is a small config change ([cli/shared/aso-storefronts.ts](cli/shared/aso-storefronts.ts))
 
 ## Project Docs
 

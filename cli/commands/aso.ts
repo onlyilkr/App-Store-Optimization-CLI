@@ -114,7 +114,7 @@ const asoCommand: CommandModule = {
       .option("country", {
         type: "string",
         default: DEFAULT_ASO_COUNTRY,
-        describe: "Storefront country code (currently US only)",
+        describe: "Storefront country code (US, TR, DE, GB, FR, IT)",
       })
       .option("stdout", {
         type: "boolean",
