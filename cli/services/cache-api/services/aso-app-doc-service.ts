@@ -306,7 +306,12 @@ async function fetchAppDocById(country: string, appId: string): Promise<AsoAppDo
       country: country.toUpperCase(),
       message,
     });
-    throw error;
+    // Return null instead of throwing so a single 4xx (commonly seen on
+    // non-US storefronts where `apps.apple.com/app/id<X>` rejects the
+    // X-Apple-Store-Front header) doesn't reject the surrounding
+    // Promise.all and abort the iTunes lookup fallback that handles
+    // these cases.
+    return null;
   }
 
   const payload = parseAppStorePayload(response.data);
