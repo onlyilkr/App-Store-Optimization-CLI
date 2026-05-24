@@ -1,3 +1,4 @@
+import axios from "axios";
 import { computeAppExpiryIsoForApp } from "./aso-keyword-utils";
 import type { AsoCacheRepository, AsoAppDoc } from "./aso-types";
 import { normalizeCountryOnAppDocs } from "./aso-app-doc-utils";
@@ -300,18 +301,32 @@ async function fetchAppDocById(country: string, appId: string): Promise<AsoAppDo
       }
     );
   } catch (error) {
+    const statusCode = axios.isAxiosError(error)
+      ? error.response?.status
+      : undefined;
     const message = error instanceof Error ? error.message : String(error);
     logger.debug("[aso-app-lookup] request failed after retries", {
       appId,
       country: country.toUpperCase(),
+      statusCode,
       message,
     });
-    // Return null instead of throwing so a single 4xx (commonly seen on
-    // non-US storefronts where `apps.apple.com/app/id<X>` rejects the
-    // X-Apple-Store-Front header) doesn't reject the surrounding
-    // Promise.all and abort the iTunes lookup fallback that handles
-    // these cases.
-    return null;
+    // Swallow ONLY client errors (4xx). `apps.apple.com/app/id<X>` returns
+    // HTTP 400 with the X-Apple-Store-Front header for many non-US
+    // storefronts (TR, etc.); returning null lets the iTunes lookup
+    // fallback in fetchAppStoreLookupAppDocs handle the unresolved id.
+    //
+    // Re-throw 5xx / network / timeout so Promise.all surfaces real upstream
+    // failures to telemetry instead of masquerading them as "this app
+    // doesn't exist on this storefront."
+    if (
+      typeof statusCode === "number" &&
+      statusCode >= 400 &&
+      statusCode < 500
+    ) {
+      return null;
+    }
+    throw error;
   }
 
   const payload = parseAppStorePayload(response.data);

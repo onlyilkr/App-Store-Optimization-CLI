@@ -28,6 +28,15 @@ type PendingDelete = {
   keywordCount: number;
 };
 
+type PendingCountryChange = {
+  projectId: string;
+  name: string;
+  fromCountry: SupportedCountry;
+  toCountry: SupportedCountry;
+  appCount: number;
+  keywordCount: number;
+};
+
 export function ProjectManageDialog({
   open,
   projects,
@@ -40,6 +49,8 @@ export function ProjectManageDialog({
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(
     null
   );
+  const [pendingCountryChange, setPendingCountryChange] =
+    useState<PendingCountryChange | null>(null);
   const [errorText, setErrorText] = useState("");
   const [isBusy, setIsBusy] = useState<string | null>(null);
 
@@ -47,6 +58,7 @@ export function ProjectManageDialog({
     if (!open) {
       setEditing({});
       setPendingDelete(null);
+      setPendingCountryChange(null);
       setErrorText("");
       setIsBusy(null);
     }
@@ -92,6 +104,53 @@ export function ProjectManageDialog({
       appCount: project.appCount,
       keywordCount: project.keywordCount,
     });
+  };
+
+  const requestCountryChange = (
+    project: ProjectSummary,
+    nextCountry: SupportedCountry
+  ) => {
+    if (nextCountry === project.country) return;
+    // Schema is partitioned by (country, app_id, keyword). Changing a
+    // project's country effectively orphans the existing keyword/rating
+    // data under the old country until the user adds it back manually.
+    // If the project is empty, no confirmation needed — nothing to orphan.
+    if (project.appCount === 0 && project.keywordCount === 0) {
+      void applyCountryChange(project.id, nextCountry);
+      return;
+    }
+    setPendingCountryChange({
+      projectId: project.id,
+      name: project.name,
+      fromCountry: project.country,
+      toCountry: nextCountry,
+      appCount: project.appCount,
+      keywordCount: project.keywordCount,
+    });
+  };
+
+  const applyCountryChange = async (
+    projectId: string,
+    country: SupportedCountry
+  ) => {
+    setIsBusy(projectId);
+    setErrorText("");
+    try {
+      await onUpdate(projectId, { country });
+    } catch (error) {
+      setErrorText(
+        error instanceof Error ? error.message : "Failed to update country."
+      );
+    } finally {
+      setIsBusy(null);
+    }
+  };
+
+  const confirmCountryChange = async () => {
+    if (!pendingCountryChange) return;
+    const { projectId, toCountry } = pendingCountryChange;
+    setPendingCountryChange(null);
+    await applyCountryChange(projectId, toCountry);
   };
 
   const confirmDelete = async () => {
@@ -182,7 +241,7 @@ export function ProjectManageDialog({
               <CountrySelector
                 id={`project-country-${project.id}`}
                 value={project.country}
-                onChange={(country) => void onUpdate(project.id, { country })}
+                onChange={(country) => requestCountryChange(project, country)}
                 disabled={isBusy === project.id}
               />
               <Button
@@ -241,6 +300,63 @@ export function ProjectManageDialog({
                   {isBusy === pendingDelete.projectId
                     ? "Deleting…"
                     : "Delete project"}
+                </Button>
+              </div>
+            </section>
+          </div>
+        ) : null}
+        {pendingCountryChange ? (
+          <div
+            className="dialog-backdrop project-manage-confirm-backdrop"
+            onClick={() => setPendingCountryChange(null)}
+            role="presentation"
+          >
+            <section
+              className="dialog-card ui-card project-dialog-card"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Confirm country change"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <header className="dialog-header">
+                <h2>
+                  Change "{pendingCountryChange.name}" from{" "}
+                  {pendingCountryChange.fromCountry} to{" "}
+                  {pendingCountryChange.toCountry}?
+                </h2>
+              </header>
+              <p className="project-manage-confirm-body">
+                Keyword and ranking data is stored per storefront. Switching
+                this project to {pendingCountryChange.toCountry} hides the
+                existing {pendingCountryChange.appCount}{" "}
+                {pendingCountryChange.appCount === 1 ? "app" : "apps"} and{" "}
+                {pendingCountryChange.keywordCount}{" "}
+                {pendingCountryChange.keywordCount === 1
+                  ? "keyword"
+                  : "keywords"}{" "}
+                under {pendingCountryChange.fromCountry} (they remain in the
+                database but won't appear in this project until you switch
+                back).
+              </p>
+              <div className="project-dialog-actions">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setPendingCountryChange(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  disabled={isBusy === pendingCountryChange.projectId}
+                  onClick={() => void confirmCountryChange()}
+                >
+                  {isBusy === pendingCountryChange.projectId
+                    ? "Switching…"
+                    : `Switch to ${pendingCountryChange.toCountry}`}
                 </Button>
               </div>
             </section>

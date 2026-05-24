@@ -16,6 +16,15 @@ import {
 const APPLE_POPULARITY_URL =
   "https://app-ads.apple.com/cm/api/v2/keywords/popularities";
 const KWS_NO_ORG_CONTENT_PROVIDERS = "KWS_NO_ORG_CONTENT_PROVIDERS";
+/**
+ * Sentinel `internalErrorCode` written on the synthesized 200 response when
+ * `treatNoOrgAsNull` translates a real KWS_NO_ORG_CONTENT_PROVIDERS 403.
+ * Downstream parsers use this to distinguish "Apple has no popularity for
+ * this keyword" (skip) from "user lacks storefront access" (record as 0
+ * sentinel so order/difficulty stages still run).
+ */
+export const NO_ORG_TRANSLATED_INTERNAL_CODE =
+  "ASO_NO_ORG_TRANSLATED_TO_NULL";
 
 export interface PopularityItem {
   name: string;
@@ -172,6 +181,7 @@ export async function requestPopularitiesWithKwsRetry(
           statusCode: 200,
           data: {
             status: "ok",
+            internalErrorCode: NO_ORG_TRANSLATED_INTERNAL_CODE,
             data: terms.map((name) => ({ name, popularity: null })),
           },
           attempts: attempt,

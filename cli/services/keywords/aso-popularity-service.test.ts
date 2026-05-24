@@ -15,6 +15,7 @@ jest.mock("../auth/aso-auth-service", () => ({
 
 jest.mock("./aso-apple-popularity-client", () => ({
   requestPopularitiesWithKwsRetry: jest.fn(),
+  NO_ORG_TRANSLATED_INTERNAL_CODE: "ASO_NO_ORG_TRANSLATED_TO_NULL",
 }));
 
 jest.mock("./aso-adam-id-service", () => ({
@@ -81,14 +82,17 @@ describe("AsoPopularityService", () => {
         "cookie=value",
         expect.any(String),
         "US",
-        { treatNoOrgAsNull: false }
+        { treatNoOrgAsNull: true }
       );
       expect(asoAuthService.getCookieHeader).toHaveBeenCalledWith(
         "https://app-ads.apple.com/cm/api/v2/keywords/popularities"
       );
     });
 
-    it("records null popularity as 0 so the keyword still flows through the pipeline", async () => {
+    it("skips genuine null popularity from real Apple responses (legacy US behavior)", async () => {
+      // No `internalErrorCode` on the response — this is a genuine Apple null,
+      // not the synthesized-from-403 case. Behavior must match pre-PR US:
+      // skip the null, leave the keyword pending for a future retry.
       mockRequestPopularitiesWithKwsRetry.mockResolvedValue({
         statusCode: 200,
         attempts: 1,
@@ -108,7 +112,7 @@ describe("AsoPopularityService", () => {
         "c",
       ]);
 
-      expect(result).toEqual({ a: 1, b: 0, c: 3 });
+      expect(result).toEqual({ a: 1, c: 3 });
     });
 
     it("throws ContextualError on non-200 response", async () => {
@@ -162,7 +166,7 @@ describe("AsoPopularityService", () => {
         "new-cookie",
         expect.any(String),
         "US",
-        { treatNoOrgAsNull: false }
+        { treatNoOrgAsNull: true }
       );
     });
 
@@ -349,7 +353,7 @@ describe("AsoPopularityService", () => {
         "cookie=value",
         expect.any(String),
         "US",
-        { maxAttempts: 1, treatNoOrgAsNull: false }
+        { maxAttempts: 1, treatNoOrgAsNull: true }
       );
       expect(mockRequestPopularitiesWithKwsRetry).toHaveBeenNthCalledWith(
         3,
@@ -357,7 +361,7 @@ describe("AsoPopularityService", () => {
         "cookie=value",
         expect.any(String),
         "US",
-        { maxAttempts: 1, treatNoOrgAsNull: false }
+        { maxAttempts: 1, treatNoOrgAsNull: true }
       );
     });
 
@@ -387,7 +391,7 @@ describe("AsoPopularityService", () => {
       );
     });
 
-    it("forwards lowercase 'us' as treatNoOrgAsNull=false (US match is case-insensitive)", async () => {
+    it("always opts into treatNoOrgAsNull regardless of country (no US-special case)", async () => {
       mockRequestPopularitiesWithKwsRetry.mockResolvedValue({
         statusCode: 200,
         attempts: 1,
@@ -404,7 +408,7 @@ describe("AsoPopularityService", () => {
         "cookie=value",
         expect.any(String),
         "us",
-        { treatNoOrgAsNull: false }
+        { treatNoOrgAsNull: true }
       );
     });
   });
@@ -417,14 +421,17 @@ describe("AsoPopularityService country threading", () => {
     jest.mocked(getConfiguredAsoAdamId).mockReturnValue("1234567890");
   });
 
-  it("forwards country to popularity client and writes popularity:null when storefront lacks org access", async () => {
-    // Mock returns null popularity for all terms — simulates the treatNoOrgAsNull
-    // degraded path where the Apple API returns null instead of a numeric score
+  it("forwards country to popularity client and writes popularity:0 when storefront lacks org access", async () => {
+    // Mock returns the synthesized response (internalErrorCode is the
+    // marker the client sets when translating KWS_NO_ORG_CONTENT_PROVIDERS
+    // into null entries). Service must persist 0 sentinel so the keyword
+    // continues through the order/difficulty pipeline.
     mockRequestPopularitiesWithKwsRetry.mockResolvedValue({
       statusCode: 200,
       attempts: 1,
       data: {
         status: "success",
+        internalErrorCode: "ASO_NO_ORG_TRANSLATED_TO_NULL",
         data: [
           { name: "uygulama", popularity: null },
           { name: "oyun", popularity: null },
@@ -454,7 +461,7 @@ describe("AsoPopularityService country threading", () => {
     expect(result.failedKeywords).toHaveLength(0);
   });
 
-  it("uses treatNoOrgAsNull=false when country is US (preserves loud failure)", async () => {
+  it("opts into treatNoOrgAsNull for US too — a US developer without org access deserves the same graceful degradation as TR", async () => {
     mockRequestPopularitiesWithKwsRetry.mockResolvedValue({
       statusCode: 200,
       attempts: 1,
@@ -471,7 +478,7 @@ describe("AsoPopularityService country threading", () => {
       "cookie=value",
       expect.any(String),
       "US",
-      { treatNoOrgAsNull: false }
+      { treatNoOrgAsNull: true }
     );
   });
 });

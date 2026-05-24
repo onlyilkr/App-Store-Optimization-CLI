@@ -574,7 +574,7 @@ export function createServerRequestHandler(): http.RequestListener {
             });
           }
         }
-        const appLastAddedAt = getAppLastKeywordAddedAtMap(DEFAULT_ASO_COUNTRY);
+        const appLastAddedAt = getAppLastKeywordAddedAtMap(country);
         const payload = apps
           .map((app) => ({
             id: app.id,
