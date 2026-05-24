@@ -88,7 +88,7 @@ describe("AsoPopularityService", () => {
       );
     });
 
-    it("skips items with null popularity", async () => {
+    it("records null popularity as 0 so the keyword still flows through the pipeline", async () => {
       mockRequestPopularitiesWithKwsRetry.mockResolvedValue({
         statusCode: 200,
         attempts: 1,
@@ -108,7 +108,7 @@ describe("AsoPopularityService", () => {
         "c",
       ]);
 
-      expect(result).toEqual({ a: 1, c: 3 });
+      expect(result).toEqual({ a: 1, b: 0, c: 3 });
     });
 
     it("throws ContextualError on non-200 response", async () => {
@@ -446,9 +446,11 @@ describe("AsoPopularityService country threading", () => {
       { treatNoOrgAsNull: true }
     );
 
-    // null popularity items are omitted from popularities map and do not
-    // produce failedKeywords — the null is the expected degraded signal
-    expect(result.popularities).toEqual({});
+    // null popularity items are recorded as 0 (sentinel for "no data") so the
+    // keyword still flows through the order/difficulty pipeline instead of
+    // getting stuck in pending. failedKeywords stays empty — null is the
+    // expected degraded signal, not an error.
+    expect(result.popularities).toEqual({ uygulama: 0, oyun: 0 });
     expect(result.failedKeywords).toHaveLength(0);
   });
 

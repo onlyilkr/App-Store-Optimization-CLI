@@ -265,11 +265,15 @@ export class AsoPopularityService {
           invalidItemCount += 1;
           continue;
         }
-        if (item.popularity === null) continue;
         const originalKeyword = sanitizedToOriginal.get(item.name);
-        if (originalKeyword) {
-          result[originalKeyword] = item.popularity;
-        }
+        if (!originalKeyword) continue;
+        // Apple returns popularity=null when (a) the user's Search Ads account
+        // lacks org access for this storefront (treatNoOrgAsNull synthesized
+        // this), or (b) Apple has no popularity data for this keyword.
+        // Persist 0 as a sentinel so the order/difficulty pipeline still runs;
+        // the keyword surfaces in the UI with popularity=0 instead of getting
+        // stuck in "pending" forever.
+        result[originalKeyword] = item.popularity ?? 0;
       }
       if (invalidItemCount > 0) {
         reportAppleContractChange({
