@@ -165,7 +165,7 @@ describe("aso-apple-popularity-client", () => {
 describe("requestPopularitiesWithKwsRetry country threading", () => {
   beforeEach(() => (mockPost as any).mockReset());
 
-  it("posts storefronts: [143480] when country=TR", async () => {
+  it("posts storefronts: ['TR'] when country=TR", async () => {
     (mockPost as any).mockResolvedValueOnce({
       status: 200,
       data: { data: [{ name: "altın", popularity: 12 }] },
@@ -178,10 +178,10 @@ describe("requestPopularitiesWithKwsRetry country threading", () => {
       "TR"
     );
     const body = (mockPost as any).mock.calls[0][1];
-    expect(body.storefronts).toEqual([143480]);
+    expect(body.storefronts).toEqual(["TR"]);
   });
 
-  it("posts storefronts: [143441] when country=US (backward compat)", async () => {
+  it("posts storefronts: ['US'] when country=US (backward compat)", async () => {
     (mockPost as any).mockResolvedValueOnce({
       status: 200,
       data: { data: [{ name: "test", popularity: 5 }] },
@@ -194,7 +194,7 @@ describe("requestPopularitiesWithKwsRetry country threading", () => {
       "US"
     );
     const body = (mockPost as any).mock.calls[0][1];
-    expect(body.storefronts).toEqual([143441]);
+    expect(body.storefronts).toEqual(["US"]);
   });
 
   it("returns popularity:null for all terms on KWS_NO_ORG_CONTENT_PROVIDERS when treatNoOrgAsNull=true", async () => {

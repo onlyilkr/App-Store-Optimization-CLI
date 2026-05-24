@@ -68,9 +68,12 @@ async function requestPopularitiesOnce(
   headers?: Record<string, unknown>;
 }> {
   const requestUrl = `${APPLE_POPULARITY_URL}?adamId=${encodeURIComponent(adamId)}`;
-  const storefrontId = getStorefrontConfig(country).storefrontId;
+  // Apple Search Ads API expects ISO 3166-1 alpha-2 country codes here, not
+  // the numeric iTunes storefrontId. Sending the numeric ID returns
+  // "Invalid storefront name:<id>".
+  const storefrontCode = getStorefrontConfig(country).country;
   const requestBody = {
-    storefronts: [storefrontId],
+    storefronts: [storefrontCode],
     terms,
   };
   const requestHeaders = {
