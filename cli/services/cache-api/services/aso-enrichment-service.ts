@@ -615,10 +615,7 @@ async function buildAppDocsFromLookup(params: {
       appIds: params.appIds,
     });
   } catch (error) {
-    // Don't crash the enrichment pipeline if app-doc lookup fails entirely,
-    // but log it so real Apple outages surface in telemetry instead of
-    // silently degrading to "no difficulty data".
-    logger.debug("[aso-enrichment] app-doc lookup failed; difficulty will be unavailable", {
+    logger.debug("[aso-enrichment] app-doc lookup failed; difficulty unavailable", {
       country: params.country,
       appIdsCount: params.appIds.length,
       message: error instanceof Error ? error.message : String(error),

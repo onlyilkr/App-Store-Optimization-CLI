@@ -311,14 +311,8 @@ async function fetchAppDocById(country: string, appId: string): Promise<AsoAppDo
       statusCode,
       message,
     });
-    // Swallow ONLY client errors (4xx). `apps.apple.com/app/id<X>` returns
-    // HTTP 400 with the X-Apple-Store-Front header for many non-US
-    // storefronts (TR, etc.); returning null lets the iTunes lookup
-    // fallback in fetchAppStoreLookupAppDocs handle the unresolved id.
-    //
-    // Re-throw 5xx / network / timeout so Promise.all surfaces real upstream
-    // failures to telemetry instead of masquerading them as "this app
-    // doesn't exist on this storefront."
+    // 4xx → null so the iTunes lookup fallback can recover (non-US
+    // storefronts return 400 here). 5xx / network bubbles up for telemetry.
     if (
       typeof statusCode === "number" &&
       statusCode >= 400 &&

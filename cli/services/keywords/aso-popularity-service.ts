@@ -142,12 +142,6 @@ export class AsoPopularityService {
     if (keywords.length > ASO_MAX_KEYWORDS) {
       throw new ContextualError(ASO_MAX_KEYWORDS_PER_CALL_ERROR);
     }
-    // Always opt into the synthesized-null degradation. The previous
-    // `country !== "US"` heuristic encoded the assumption that only US
-    // accounts have org access — wrong axis. A US developer without
-    // Search Ads org access deserves the same graceful degradation as a
-    // TR developer; both end up with popularity:null (sentinel-encoded
-    // downstream as 0) so the order/difficulty stages still run.
     const treatNoOrgAsNull = true;
 
     const sanitizedToOriginal = new Map<string, string>();
@@ -266,14 +260,8 @@ export class AsoPopularityService {
         return result;
       }
 
-      // Distinguish synthesized null (from treatNoOrgAsNull translating a
-      // 403 KWS_NO_ORG_CONTENT_PROVIDERS into a fake 200) from a genuine
-      // null in a real Apple response. The synthesized case marks itself
-      // with NO_ORG_TRANSLATED_INTERNAL_CODE so we can persist 0 here as
-      // the "no-storefront-access" sentinel and keep order/difficulty
-      // stages running. A genuine null from a real Apple response keeps
-      // the pre-existing US behavior (skip, leave the keyword pending so
-      // it can be retried).
+      // Synthesized no-org responses persist 0 (sentinel); genuine Apple
+      // nulls are skipped so the keyword stays pending and can be retried.
       const isSynthesizedNoOrg =
         response.data.internalErrorCode === NO_ORG_TRANSLATED_INTERNAL_CODE;
       let invalidItemCount = 0;

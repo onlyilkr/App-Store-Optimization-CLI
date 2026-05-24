@@ -57,9 +57,9 @@ describe("dashboard auth modal UI flow", () => {
   it("auto-starts reauthentication after AUTH_REQUIRED without showing modal when no user input is needed", async () => {
     const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
+      const pathname = url.split("?")[0];      const method = (init?.method ?? "GET").toUpperCase();
 
-      if (method === "GET" && url === "/api/apps") {
+      if (method === "GET" && pathname === "/api/apps") {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
@@ -68,7 +68,7 @@ describe("dashboard auth modal UI flow", () => {
           body: { success: true, data: emptyKeywordPagedPayload() },
         });
       }
-      if (method === "GET" && url === "/api/aso/refresh-status") {
+      if (method === "GET" && pathname === "/api/aso/refresh-status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -89,7 +89,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/keywords") {
+      if (method === "POST" && pathname === "/api/aso/keywords") {
         return jsonResponse({
           status: 401,
           body: {
@@ -99,7 +99,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/auth/start") {
+      if (method === "POST" && pathname === "/api/aso/auth/start") {
         return jsonResponse({
           status: 202,
           body: {
@@ -114,7 +114,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "GET" && url === "/api/aso/auth/status") {
+      if (method === "GET" && pathname === "/api/aso/auth/status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -142,7 +142,7 @@ describe("dashboard auth modal UI flow", () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/aso/auth/start",
+        expect.stringMatching(/^\/api\/aso\/auth\/start(\?|$)/),
         expect.objectContaining({
           method: "POST",
         })
@@ -164,9 +164,9 @@ describe("dashboard auth modal UI flow", () => {
     let authStatusCount = 0;
     const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
+      const pathname = url.split("?")[0];      const method = (init?.method ?? "GET").toUpperCase();
 
-      if (method === "GET" && url === "/api/apps") {
+      if (method === "GET" && pathname === "/api/apps") {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
@@ -175,7 +175,7 @@ describe("dashboard auth modal UI flow", () => {
           body: { success: true, data: emptyKeywordPagedPayload() },
         });
       }
-      if (method === "GET" && url === "/api/aso/refresh-status") {
+      if (method === "GET" && pathname === "/api/aso/refresh-status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -196,7 +196,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/keywords") {
+      if (method === "POST" && pathname === "/api/aso/keywords") {
         keywordPostCount += 1;
         if (keywordPostCount === 1) {
           return jsonResponse({
@@ -219,7 +219,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/auth/start") {
+      if (method === "POST" && pathname === "/api/aso/auth/start") {
         return jsonResponse({
           status: 202,
           body: {
@@ -234,7 +234,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "GET" && url === "/api/aso/auth/status") {
+      if (method === "GET" && pathname === "/api/aso/auth/status") {
         authStatusCount += 1;
         if (authStatusCount === 1) {
           return jsonResponse({
@@ -285,9 +285,9 @@ describe("dashboard auth modal UI flow", () => {
     let submittedBody: string | null = null;
     const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
+      const pathname = url.split("?")[0];      const method = (init?.method ?? "GET").toUpperCase();
 
-      if (method === "GET" && url === "/api/apps") {
+      if (method === "GET" && pathname === "/api/apps") {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
@@ -296,7 +296,7 @@ describe("dashboard auth modal UI flow", () => {
           body: { success: true, data: emptyKeywordPagedPayload() },
         });
       }
-      if (method === "GET" && url === "/api/aso/refresh-status") {
+      if (method === "GET" && pathname === "/api/aso/refresh-status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -315,7 +315,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "GET" && url === "/api/aso/setup/status") {
+      if (method === "GET" && pathname === "/api/aso/setup/status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -337,7 +337,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/setup/respond") {
+      if (method === "POST" && pathname === "/api/aso/setup/respond") {
         submittedBody = String(init?.body ?? "");
         return jsonResponse({
           status: 202,
@@ -369,7 +369,7 @@ describe("dashboard auth modal UI flow", () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/aso/setup/respond",
+        expect.stringMatching(/^\/api\/aso\/setup\/respond(\?|$)/),
         expect.objectContaining({
           method: "POST",
         })
@@ -389,9 +389,9 @@ describe("dashboard auth modal UI flow", () => {
 
     const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
+      const pathname = url.split("?")[0];      const method = (init?.method ?? "GET").toUpperCase();
 
-      if (method === "GET" && url === "/api/apps") {
+      if (method === "GET" && pathname === "/api/apps") {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
@@ -400,7 +400,7 @@ describe("dashboard auth modal UI flow", () => {
           body: { success: true, data: emptyKeywordPagedPayload() },
         });
       }
-      if (method === "GET" && url === "/api/aso/refresh-status") {
+      if (method === "GET" && pathname === "/api/aso/refresh-status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -421,7 +421,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/keywords") {
+      if (method === "POST" && pathname === "/api/aso/keywords") {
         return jsonResponse({
           status: 401,
           body: {
@@ -431,10 +431,10 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/auth/start") {
+      if (method === "POST" && pathname === "/api/aso/auth/start") {
         return authStartPromise;
       }
-      if (method === "GET" && url === "/api/aso/auth/status") {
+      if (method === "GET" && pathname === "/api/aso/auth/status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -492,9 +492,9 @@ describe("dashboard auth modal UI flow", () => {
   it("keeps auth prompt submit errors visible while status polling continues", async () => {
     const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
+      const pathname = url.split("?")[0];      const method = (init?.method ?? "GET").toUpperCase();
 
-      if (method === "GET" && url === "/api/apps") {
+      if (method === "GET" && pathname === "/api/apps") {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
@@ -503,7 +503,7 @@ describe("dashboard auth modal UI flow", () => {
           body: { success: true, data: emptyKeywordPagedPayload() },
         });
       }
-      if (method === "GET" && url === "/api/aso/refresh-status") {
+      if (method === "GET" && pathname === "/api/aso/refresh-status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -522,7 +522,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/keywords") {
+      if (method === "POST" && pathname === "/api/aso/keywords") {
         return jsonResponse({
           status: 401,
           body: {
@@ -532,7 +532,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/auth/start") {
+      if (method === "POST" && pathname === "/api/aso/auth/start") {
         return jsonResponse({
           status: 202,
           body: {
@@ -547,7 +547,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "GET" && url === "/api/aso/auth/status") {
+      if (method === "GET" && pathname === "/api/aso/auth/status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -567,7 +567,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/auth/respond") {
+      if (method === "POST" && pathname === "/api/aso/auth/respond") {
         return jsonResponse({
           status: 400,
           body: {
@@ -614,9 +614,9 @@ describe("dashboard auth modal UI flow", () => {
 
     const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
+      const pathname = url.split("?")[0];      const method = (init?.method ?? "GET").toUpperCase();
 
-      if (method === "GET" && url === "/api/apps") {
+      if (method === "GET" && pathname === "/api/apps") {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
@@ -625,7 +625,7 @@ describe("dashboard auth modal UI flow", () => {
           body: { success: true, data: emptyKeywordPagedPayload() },
         });
       }
-      if (method === "GET" && url === "/api/aso/refresh-status") {
+      if (method === "GET" && pathname === "/api/aso/refresh-status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -644,7 +644,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/keywords") {
+      if (method === "POST" && pathname === "/api/aso/keywords") {
         return jsonResponse({
           status: 401,
           body: {
@@ -654,7 +654,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/auth/start") {
+      if (method === "POST" && pathname === "/api/aso/auth/start") {
         return jsonResponse({
           status: 202,
           body: {
@@ -669,7 +669,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "GET" && url === "/api/aso/auth/status") {
+      if (method === "GET" && pathname === "/api/aso/auth/status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -690,7 +690,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/auth/respond") {
+      if (method === "POST" && pathname === "/api/aso/auth/respond") {
         return promptSubmitPromise;
       }
 
@@ -744,9 +744,9 @@ describe("dashboard auth modal UI flow", () => {
 
     const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
+      const pathname = url.split("?")[0];      const method = (init?.method ?? "GET").toUpperCase();
 
-      if (method === "GET" && url === "/api/apps") {
+      if (method === "GET" && pathname === "/api/apps") {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
@@ -755,7 +755,7 @@ describe("dashboard auth modal UI flow", () => {
           body: { success: true, data: emptyKeywordPagedPayload() },
         });
       }
-      if (method === "GET" && url === "/api/aso/refresh-status") {
+      if (method === "GET" && pathname === "/api/aso/refresh-status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -774,7 +774,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/keywords") {
+      if (method === "POST" && pathname === "/api/aso/keywords") {
         return jsonResponse({
           status: 401,
           body: {
@@ -784,7 +784,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/auth/start") {
+      if (method === "POST" && pathname === "/api/aso/auth/start") {
         return jsonResponse({
           status: 202,
           body: {
@@ -799,7 +799,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "GET" && url === "/api/aso/auth/status") {
+      if (method === "GET" && pathname === "/api/aso/auth/status") {
         authStatusCount += 1;
         if (authStatusCount <= 2) {
           return jsonResponse({
@@ -845,7 +845,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/auth/respond") {
+      if (method === "POST" && pathname === "/api/aso/auth/respond") {
         return authRespondPromise;
       }
 
@@ -896,9 +896,9 @@ describe("dashboard auth modal UI flow", () => {
 
     const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
+      const pathname = url.split("?")[0];      const method = (init?.method ?? "GET").toUpperCase();
 
-      if (method === "GET" && url === "/api/apps") {
+      if (method === "GET" && pathname === "/api/apps") {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
@@ -907,7 +907,7 @@ describe("dashboard auth modal UI flow", () => {
           body: { success: true, data: emptyKeywordPagedPayload() },
         });
       }
-      if (method === "GET" && url === "/api/aso/refresh-status") {
+      if (method === "GET" && pathname === "/api/aso/refresh-status") {
         refreshStatusCount += 1;
         if (refreshStatusCount === 1) {
           return jsonResponse({
@@ -949,7 +949,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/auth/start") {
+      if (method === "POST" && pathname === "/api/aso/auth/start") {
         authStartCount += 1;
         return jsonResponse({
           status: 202,
@@ -965,7 +965,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "GET" && url === "/api/aso/auth/status") {
+      if (method === "GET" && pathname === "/api/aso/auth/status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -980,7 +980,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/refresh/start") {
+      if (method === "POST" && pathname === "/api/aso/refresh/start") {
         refreshStartCount += 1;
         return jsonResponse({
           status: 202,
@@ -1028,9 +1028,9 @@ describe("dashboard auth modal UI flow", () => {
 
     const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
+      const pathname = url.split("?")[0];      const method = (init?.method ?? "GET").toUpperCase();
 
-      if (method === "GET" && url === "/api/apps") {
+      if (method === "GET" && pathname === "/api/apps") {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
@@ -1045,7 +1045,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "GET" && url === "/api/aso/refresh-status") {
+      if (method === "GET" && pathname === "/api/aso/refresh-status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -1066,7 +1066,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/auth/start") {
+      if (method === "POST" && pathname === "/api/aso/auth/start") {
         return jsonResponse({
           status: 202,
           body: {
@@ -1081,7 +1081,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "GET" && url === "/api/aso/auth/status") {
+      if (method === "GET" && pathname === "/api/aso/auth/status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -1096,7 +1096,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/keywords") {
+      if (method === "POST" && pathname === "/api/aso/keywords") {
         keywordPostCount += 1;
         return jsonResponse({
           status: 201,
@@ -1151,9 +1151,9 @@ describe("dashboard auth modal UI flow", () => {
 
     const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
+      const pathname = url.split("?")[0];      const method = (init?.method ?? "GET").toUpperCase();
 
-      if (method === "GET" && url === "/api/apps") {
+      if (method === "GET" && pathname === "/api/apps") {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
@@ -1162,7 +1162,7 @@ describe("dashboard auth modal UI flow", () => {
           body: { success: true, data: emptyKeywordPagedPayload() },
         });
       }
-      if (method === "GET" && url === "/api/aso/refresh-status") {
+      if (method === "GET" && pathname === "/api/aso/refresh-status") {
         refreshStatusCount += 1;
         if (refreshStatusCount === 1) {
           return jsonResponse({
@@ -1204,7 +1204,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/auth/start") {
+      if (method === "POST" && pathname === "/api/aso/auth/start") {
         authStartCount += 1;
         return jsonResponse({
           status: 202,
@@ -1220,7 +1220,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "GET" && url === "/api/aso/auth/status") {
+      if (method === "GET" && pathname === "/api/aso/auth/status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -1235,7 +1235,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/refresh/start") {
+      if (method === "POST" && pathname === "/api/aso/refresh/start") {
         refreshStartCount += 1;
         return refreshStartPromise;
       }
@@ -1291,9 +1291,9 @@ describe("dashboard auth modal UI flow", () => {
   it("shows concise startup refresh failure text without backend reason details", async () => {
     const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
+      const pathname = url.split("?")[0];      const method = (init?.method ?? "GET").toUpperCase();
 
-      if (method === "GET" && url === "/api/apps") {
+      if (method === "GET" && pathname === "/api/apps") {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
@@ -1302,7 +1302,7 @@ describe("dashboard auth modal UI flow", () => {
           body: { success: true, data: emptyKeywordPagedPayload() },
         });
       }
-      if (method === "GET" && url === "/api/aso/refresh-status") {
+      if (method === "GET" && pathname === "/api/aso/refresh-status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -1349,9 +1349,9 @@ describe("dashboard auth modal UI flow", () => {
 
     const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
+      const pathname = url.split("?")[0];      const method = (init?.method ?? "GET").toUpperCase();
 
-      if (method === "GET" && url === "/api/apps") {
+      if (method === "GET" && pathname === "/api/apps") {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
@@ -1360,7 +1360,7 @@ describe("dashboard auth modal UI flow", () => {
           body: { success: true, data: emptyKeywordPagedPayload() },
         });
       }
-      if (method === "GET" && url === "/api/aso/refresh-status") {
+      if (method === "GET" && pathname === "/api/aso/refresh-status") {
         refreshStatusCount += 1;
         if (refreshStatusCount <= 2) {
           return jsonResponse({
@@ -1408,7 +1408,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/auth/start") {
+      if (method === "POST" && pathname === "/api/aso/auth/start") {
         authStartCount += 1;
         return jsonResponse({
           status: 202,
@@ -1424,7 +1424,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "GET" && url === "/api/aso/auth/status") {
+      if (method === "GET" && pathname === "/api/aso/auth/status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -1439,7 +1439,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/refresh/start") {
+      if (method === "POST" && pathname === "/api/aso/refresh/start") {
         refreshStartCount += 1;
         return jsonResponse({
           status: 202,
@@ -1484,9 +1484,9 @@ describe("dashboard auth modal UI flow", () => {
 
     const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
+      const pathname = url.split("?")[0];      const method = (init?.method ?? "GET").toUpperCase();
 
-      if (method === "GET" && url === "/api/apps") {
+      if (method === "GET" && pathname === "/api/apps") {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
@@ -1495,7 +1495,7 @@ describe("dashboard auth modal UI flow", () => {
           body: { success: true, data: emptyKeywordPagedPayload() },
         });
       }
-      if (method === "GET" && url === "/api/aso/refresh-status") {
+      if (method === "GET" && pathname === "/api/aso/refresh-status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -1516,7 +1516,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/auth/start") {
+      if (method === "POST" && pathname === "/api/aso/auth/start") {
         authStartCount += 1;
         return jsonResponse({
           status: 202,
@@ -1532,7 +1532,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "GET" && url === "/api/aso/auth/status") {
+      if (method === "GET" && pathname === "/api/aso/auth/status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -1573,9 +1573,9 @@ describe("dashboard auth modal UI flow", () => {
 
     const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
+      const pathname = url.split("?")[0];      const method = (init?.method ?? "GET").toUpperCase();
 
-      if (method === "GET" && url === "/api/apps") {
+      if (method === "GET" && pathname === "/api/apps") {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
@@ -1584,7 +1584,7 @@ describe("dashboard auth modal UI flow", () => {
           body: { success: true, data: emptyKeywordPagedPayload() },
         });
       }
-      if (method === "GET" && url === "/api/aso/refresh-status") {
+      if (method === "GET" && pathname === "/api/aso/refresh-status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -1605,7 +1605,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "GET" && url === "/api/aso/setup/status") {
+      if (method === "GET" && pathname === "/api/aso/setup/status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -1630,7 +1630,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/keywords") {
+      if (method === "POST" && pathname === "/api/aso/keywords") {
         return jsonResponse({
           status: 403,
           body: {
@@ -1640,7 +1640,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/setup/start?force=1") {
+      if (method === "POST" && pathname === "/api/aso/setup/start" && url.includes("force=1")) {
         setupStartCount += 1;
         return jsonResponse({
           status: 202,
@@ -1680,7 +1680,7 @@ describe("dashboard auth modal UI flow", () => {
     expect(await screen.findByText(primaryAppError)).toBeInTheDocument();
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/aso/setup/start?force=1",
+        expect.stringMatching(/^\/api\/aso\/setup\/start\?.*force=1/),
         expect.objectContaining({
           method: "POST",
         })
@@ -1692,9 +1692,9 @@ describe("dashboard auth modal UI flow", () => {
     let authStartCount = 0;
     const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
+      const pathname = url.split("?")[0];      const method = (init?.method ?? "GET").toUpperCase();
 
-      if (method === "GET" && url === "/api/apps") {
+      if (method === "GET" && pathname === "/api/apps") {
         return jsonResponse({ status: 200, body: { success: true, data: [] } });
       }
       if (method === "GET" && url.startsWith("/api/aso/keywords?")) {
@@ -1703,7 +1703,7 @@ describe("dashboard auth modal UI flow", () => {
           body: { success: true, data: emptyKeywordPagedPayload() },
         });
       }
-      if (method === "GET" && url === "/api/aso/refresh-status") {
+      if (method === "GET" && pathname === "/api/aso/refresh-status") {
         return jsonResponse({
           status: 200,
           body: {
@@ -1724,7 +1724,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/keywords") {
+      if (method === "POST" && pathname === "/api/aso/keywords") {
         return jsonResponse({
           status: 401,
           body: {
@@ -1734,7 +1734,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "POST" && url === "/api/aso/auth/start") {
+      if (method === "POST" && pathname === "/api/aso/auth/start") {
         authStartCount += 1;
         return jsonResponse({
           status: 202,
@@ -1750,7 +1750,7 @@ describe("dashboard auth modal UI flow", () => {
           },
         });
       }
-      if (method === "GET" && url === "/api/aso/auth/status") {
+      if (method === "GET" && pathname === "/api/aso/auth/status") {
         return jsonResponse({
           status: 200,
           body: {

@@ -253,9 +253,9 @@ function buildKeywordPagedPayloadForQuery(
 function buildFetchMock(options: FetchMockOptions) {
   return jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    const method = (init?.method ?? "GET").toUpperCase();
+    const pathname = url.split("?")[0];    const method = (init?.method ?? "GET").toUpperCase();
 
-    if (method === "GET" && url === "/api/apps") {
+    if (method === "GET" && pathname === "/api/apps") {
       return jsonResponse({
         status: 200,
         body: { success: true, data: withAppKinds(options.apps) },
@@ -282,7 +282,7 @@ function buildFetchMock(options: FetchMockOptions) {
       });
     }
 
-    if (method === "GET" && url === "/api/aso/refresh-status") {
+    if (method === "GET" && pathname === "/api/aso/refresh-status") {
       return jsonResponse({
         status: 200,
         body: {
@@ -516,9 +516,9 @@ describe("dashboard keyword columns", () => {
     localStorage.setItem("aso-dashboard:selected-app-id", "123456789");
     const fetchMock = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
+      const pathname = url.split("?")[0];      const method = (init?.method ?? "GET").toUpperCase();
 
-      if (method === "GET" && url === "/api/apps") {
+      if (method === "GET" && pathname === "/api/apps") {
         return jsonResponse({
           status: 200,
           body: {
@@ -592,7 +592,7 @@ describe("dashboard keyword columns", () => {
         });
       }
 
-      if (method === "GET" && url === "/api/aso/refresh-status") {
+      if (method === "GET" && pathname === "/api/aso/refresh-status") {
         return jsonResponse({
           status: 200,
           body: {

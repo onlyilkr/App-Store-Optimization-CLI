@@ -16,13 +16,8 @@ import {
 const APPLE_POPULARITY_URL =
   "https://app-ads.apple.com/cm/api/v2/keywords/popularities";
 const KWS_NO_ORG_CONTENT_PROVIDERS = "KWS_NO_ORG_CONTENT_PROVIDERS";
-/**
- * Sentinel `internalErrorCode` written on the synthesized 200 response when
- * `treatNoOrgAsNull` translates a real KWS_NO_ORG_CONTENT_PROVIDERS 403.
- * Downstream parsers use this to distinguish "Apple has no popularity for
- * this keyword" (skip) from "user lacks storefront access" (record as 0
- * sentinel so order/difficulty stages still run).
- */
+/** Marker on the synthesized 200 that `treatNoOrgAsNull` returns; downstream
+ *  parsers use it to distinguish a real Apple null from a no-access fallback. */
 export const NO_ORG_TRANSLATED_INTERNAL_CODE =
   "ASO_NO_ORG_TRANSLATED_TO_NULL";
 
@@ -77,9 +72,7 @@ async function requestPopularitiesOnce(
   headers?: Record<string, unknown>;
 }> {
   const requestUrl = `${APPLE_POPULARITY_URL}?adamId=${encodeURIComponent(adamId)}`;
-  // Apple Search Ads API expects ISO 3166-1 alpha-2 country codes here, not
-  // the numeric iTunes storefrontId. Sending the numeric ID returns
-  // "Invalid storefront name:<id>".
+  // Search Ads expects ISO codes here, not numeric storefrontIds.
   const storefrontCode = getStorefrontConfig(country).country;
   const requestBody = {
     storefronts: [storefrontCode],
@@ -167,9 +160,6 @@ export async function requestPopularitiesWithKwsRetry(
         country
       );
 
-      // Translate "no storefront access" 403 into all-null popularity if opted in.
-      // This keeps non-US storefronts useful (rank/difficulty still work) when the
-      // user's Apple Search Ads account has no org access in that country.
       if (
         treatNoOrgAsNull &&
         isNoOrgContentProvidersError(response.statusCode, response.data)

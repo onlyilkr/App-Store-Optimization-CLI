@@ -148,10 +148,7 @@ export function useAddAppSearch() {
     setAddAppSearchResults([]);
 
     const debounceTimer = window.setTimeout(() => {
-      // No `country` query param: the server authoritatively resolves the
-      // storefront from the current project via resolveCountryForProject().
-      // Sending a client-side override would be misleading dead code at best
-      // and a privilege-escalation surface at worst.
+      // Country is resolved server-side from the current project.
       void apiGet<AppSearchResponsePayload>(
         `/api/aso/apps/search?term=${encodeURIComponent(term)}&limit=${APP_SEARCH_LIMIT}`
       )

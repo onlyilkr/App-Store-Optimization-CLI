@@ -84,10 +84,10 @@ function buildFetchMock(params: {
   let appsCallCount = 0;
   return jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    const method = (init?.method ?? "GET").toUpperCase();
+    const pathname = url.split("?")[0];    const method = (init?.method ?? "GET").toUpperCase();
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
 
-    if (method === "GET" && url === "/api/apps") {
+    if (method === "GET" && pathname === "/api/apps") {
       appsCallCount += 1;
       return jsonResponse(200, {
         success: true,
@@ -147,7 +147,7 @@ function buildFetchMock(params: {
       });
     }
 
-    if (method === "GET" && url === "/api/aso/refresh-status") {
+    if (method === "GET" && pathname === "/api/aso/refresh-status") {
       return jsonResponse(200, {
         success: true,
         data: {
@@ -166,7 +166,7 @@ function buildFetchMock(params: {
       });
     }
 
-    if (method === "POST" && url === "/api/apps") {
+    if (method === "POST" && pathname === "/api/apps") {
       params.onPostApps?.(body);
       return jsonResponse(201, {
         success: true,
@@ -177,7 +177,7 @@ function buildFetchMock(params: {
       });
     }
 
-    if (method === "DELETE" && url === "/api/apps") {
+    if (method === "DELETE" && pathname === "/api/apps") {
       params.onDeleteApps?.(body);
       return jsonResponse(200, {
         success: true,
@@ -188,7 +188,7 @@ function buildFetchMock(params: {
       });
     }
 
-    if (method === "POST" && url === "/api/aso/top-apps") {
+    if (method === "POST" && pathname === "/api/aso/top-apps") {
       return jsonResponse(500, { success: false, error: "not used" });
     }
 
@@ -201,12 +201,12 @@ function buildFetchMock(params: {
       });
     }
 
-    if (method === "DELETE" && url === "/api/aso/keywords") {
+    if (method === "DELETE" && pathname === "/api/aso/keywords") {
       params.onDeleteKeywords?.(body);
       return jsonResponse(200, { success: true, data: { removedCount: 1 } });
     }
 
-    if (method === "POST" && url === "/api/aso/keywords/retry-failed") {
+    if (method === "POST" && pathname === "/api/aso/keywords/retry-failed") {
       params.onRetryFailed?.(body);
       return jsonResponse(200, {
         success: true,
@@ -218,7 +218,7 @@ function buildFetchMock(params: {
       });
     }
 
-    if (method === "POST" && url === "/api/aso/keywords") {
+    if (method === "POST" && pathname === "/api/aso/keywords") {
       return jsonResponse(201, {
         success: true,
         data: { cachedCount: 0, pendingCount: 0, failedCount: 0 },
