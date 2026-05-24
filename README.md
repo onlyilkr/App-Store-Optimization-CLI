@@ -5,11 +5,12 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/aso-cli"><img src="https://img.shields.io/npm/v/aso-cli" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@onlyilkr/aso-cli"><img src="https://img.shields.io/npm/v/@onlyilkr/aso-cli" alt="npm version" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License: MIT" /></a>
-  <a href="https://www.npmjs.com/package/aso-cli"><img src="https://img.shields.io/node/v/aso-cli" alt="Node.js" /></a>
-  <a href="https://github.com/semihcihan/App-Store-Optimization-CLI/actions/workflows/ci.yml"><img src="https://github.com/semihcihan/App-Store-Optimization-CLI/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
+  <a href="https://www.npmjs.com/package/@onlyilkr/aso-cli"><img src="https://img.shields.io/node/v/@onlyilkr/aso-cli" alt="Node.js" /></a>
 </p>
+
+> 📌 **Actively maintained fork** of [semihcihan/App-Store-Optimization-CLI](https://github.com/semihcihan/App-Store-Optimization-CLI). The upstream repository became inactive; this fork carries the project forward with **multi-storefront support (US/TR/DE/GB/FR/IT)**, ongoing bugfixes, and feature work. Full credit to [Semih Cihan](https://github.com/semihcihan) for the original foundation — see [LICENSE](./LICENSE).
 
 Research ASO keywords, inspect competition, and manage results from one local-first CLI.
 
@@ -40,10 +41,23 @@ The dashboard keywords shown above were discovered and added automatically by an
 ## Install
 
 ```bash
-npm install -g aso-cli
+npm install -g @onlyilkr/aso-cli
 ```
 
+The CLI command is still `aso` (binary name is unchanged for muscle-memory compatibility with the upstream package).
+
 Note: requires Node.js `>=18.14.1`.
+
+### Migrating from `aso-cli` (upstream)
+
+If you previously installed `aso-cli`, uninstall it first to avoid `aso` binary conflicts:
+
+```bash
+npm uninstall -g aso-cli
+npm install -g @onlyilkr/aso-cli
+```
+
+Your local database (`~/.aso/aso-db.sqlite`) and any saved credentials are preserved — this fork is backward-compatible with upstream data.
 
 ## Apple Search Ads Setup
 

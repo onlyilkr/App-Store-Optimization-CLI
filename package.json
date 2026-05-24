@@ -1,11 +1,14 @@
 {
-  "name": "aso-cli",
-  "version": "0.11.0",
-  "description": "Local App Store Optimization CLI",
+  "name": "@onlyilkr/aso-cli",
+  "version": "1.0.0",
+  "description": "Multi-storefront ASO CLI (US/TR/DE/GB/FR/IT) — actively maintained fork of aso-cli",
   "main": "cli/dist/cli.js",
   "bin": {
     "aso": "cli/dist/cli.js",
     "aso-mcp": "cli/dist/mcp.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "check:node": "node scripts/check-node-version.js",
@@ -46,11 +49,22 @@
     "app-store",
     "keyword-research",
     "app-store-optimization",
+    "multi-storefront",
+    "turkey",
+    "europe",
     "mcp"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/semihcihan/App-Store-Optimization-CLI.git"
+    "url": "git+https://github.com/onlyilkr/App-Store-Optimization-CLI.git"
+  },
+  "bugs": {
+    "url": "https://github.com/onlyilkr/App-Store-Optimization-CLI/issues"
+  },
+  "author": {
+    "name": "İlker Güldalı",
+    "email": "guldaliilker@gmail.com",
+    "url": "https://github.com/onlyilkr"
   },
   "contributors": [
     {
@@ -63,7 +77,7 @@
     "node": ">=18.14.1",
     "npm": ">=8.0.0"
   },
-  "homepage": "https://github.com/semihcihan/App-Store-Optimization-CLI",
+  "homepage": "https://github.com/onlyilkr/App-Store-Optimization-CLI",
   "files": [
     "cli/dist/",
     "README.md",
