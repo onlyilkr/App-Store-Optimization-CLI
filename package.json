@@ -1,11 +1,14 @@
 {
-  "name": "aso-cli",
-  "version": "0.8.0",
-  "description": "Local App Store Optimization CLI",
+  "name": "@onlyilkr/aso-cli",
+  "version": "1.0.0",
+  "description": "Multi-storefront ASO CLI (US/TR/DE/GB/FR/IT) — actively maintained fork of aso-cli",
   "main": "cli/dist/cli.js",
   "bin": {
     "aso": "cli/dist/cli.js",
     "aso-mcp": "cli/dist/mcp.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "check:node": "node scripts/check-node-version.js",
@@ -20,6 +23,9 @@
     "watch": "npm run build:watch",
     "dashboard:build": "vite build --config cli/dashboard-ui/vite.config.ts",
     "dashboard:watch": "vite build --watch --config cli/dashboard-ui/vite.config.ts",
+    "website:dev": "npm run --prefix website dev:watch",
+    "website:build": "npm run --prefix website build",
+    "website:preview": "npm run --prefix website preview -- --host localhost --port 4321",
     "dev": "concurrently -k -n watch,app \"npm:watch\" \"npm:start:dev\"",
     "clean": "rm -rf cli/dist",
     "nuke": "rm -rf node_modules cli/dist package-lock.json",
@@ -43,11 +49,22 @@
     "app-store",
     "keyword-research",
     "app-store-optimization",
+    "multi-storefront",
+    "turkey",
+    "europe",
     "mcp"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/semihcihan/App-Store-Optimization-CLI.git"
+    "url": "git+https://github.com/onlyilkr/App-Store-Optimization-CLI.git"
+  },
+  "bugs": {
+    "url": "https://github.com/onlyilkr/App-Store-Optimization-CLI/issues"
+  },
+  "author": {
+    "name": "İlker Güldalı",
+    "email": "guldaliilker@gmail.com",
+    "url": "https://github.com/onlyilkr"
   },
   "contributors": [
     {
@@ -57,10 +74,10 @@
   ],
   "license": "MIT",
   "engines": {
-    "node": ">=20.18.1",
+    "node": ">=18.14.1",
     "npm": ">=8.0.0"
   },
-  "homepage": "https://github.com/semihcihan/App-Store-Optimization-CLI",
+  "homepage": "https://github.com/onlyilkr/App-Store-Optimization-CLI",
   "files": [
     "cli/dist/",
     "README.md",
@@ -75,6 +92,7 @@
     "dotenv": "^16.6.1",
     "inquirer": "^8.2.5",
     "ora": "^8.2.0",
+    "posthog-node": "^5.30.4",
     "winston": "^3.17.0",
     "yargs": "^17.7.2",
     "zod": "4.1.9",

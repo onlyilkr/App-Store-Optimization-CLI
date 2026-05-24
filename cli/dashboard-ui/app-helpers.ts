@@ -2,6 +2,7 @@ import { notifyDashboardError } from "./bugsnag";
 import {
   authFlowErrorMessage as authFlowErrorMessageFromDomain,
   isAuthFlowErrorCode as isAuthFlowErrorCodeFromDomain,
+  isPrimaryAppIdReconfigureErrorCode as isPrimaryAppIdReconfigureErrorCodeFromDomain,
   toDashboardActionableErrorMessage,
 } from "../domain/errors/dashboard-errors";
 import { DEFAULT_ASO_COUNTRY as DOMAIN_DEFAULT_ASO_COUNTRY } from "../domain/keywords/policy";
@@ -71,7 +72,7 @@ const isSensitiveField = buildSensitiveKeyMatcher({
 
 type DashboardApiTrace = {
   timestamp: string;
-  method: "GET" | "POST" | "DELETE";
+  method: "GET" | "POST" | "DELETE" | "PUT" | "PATCH";
   path: string;
   durationMs: number;
   request: {
@@ -146,7 +147,7 @@ function getTelemetryDashboardApiTraces(): DashboardApiTrace[] {
 }
 
 function toDashboardApiOperation(
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "DELETE" | "PUT" | "PATCH",
   path: string
 ): string {
   const operationPath = path.split("?")[0] || path;
@@ -170,6 +171,10 @@ export function authFlowErrorMessage(code: string | null): string {
   return authFlowErrorMessageFromDomain(code);
 }
 
+export function isPrimaryAppIdReconfigureErrorCode(code: string | null): boolean {
+  return isPrimaryAppIdReconfigureErrorCodeFromDomain(code);
+}
+
 export function toActionableErrorMessage(
   error: unknown,
   fallbackMessage: string
@@ -177,12 +182,35 @@ export function toActionableErrorMessage(
   return toDashboardActionableErrorMessage(error, fallbackMessage);
 }
 
+let currentProjectIdForRequests: string | null = null;
+
+export function setCurrentProjectIdForRequests(projectId: string | null): void {
+  currentProjectIdForRequests = projectId;
+}
+
+export function getCurrentProjectIdForRequests(): string | null {
+  return currentProjectIdForRequests;
+}
+
+function appendProjectIdIfMissing(path: string): string {
+  if (!currentProjectIdForRequests) return path;
+  if (path.startsWith("/api/projects")) return path;
+  const [base, query = ""] = path.split("?");
+  const params = new URLSearchParams(query);
+  if (!params.has("projectId")) {
+    params.set("projectId", currentProjectIdForRequests);
+  }
+  const qs = params.toString();
+  return qs ? `${base}?${qs}` : base;
+}
+
 export async function apiRequest<T>(
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "DELETE" | "PUT" | "PATCH",
   path: string,
   body?: unknown
 ): Promise<T> {
-  const sanitizedPath = sanitizeTelemetryUrl(path, {
+  const requestPath = appendProjectIdIfMissing(path);
+  const sanitizedPath = sanitizeTelemetryUrl(requestPath, {
     isSensitiveKey: isSensitiveField,
     baseUrl: "http://dashboard.local",
   });
@@ -209,7 +237,7 @@ export async function apiRequest<T>(
   };
 
   try {
-    const response = await fetch(path, {
+    const response = await fetch(requestPath, {
       method,
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -265,7 +293,7 @@ export async function apiGet<T>(path: string): Promise<T> {
 }
 
 export async function apiWrite<T>(
-  method: "POST" | "DELETE",
+  method: "POST" | "DELETE" | "PUT" | "PATCH",
   path: string,
   body: unknown
 ): Promise<T> {
@@ -380,22 +408,25 @@ export const formatDate = (value?: string, locale?: string): string => {
   const diffMs = Date.now() - updatedAt.getTime();
   if (diffMs < 0) return absoluteDate;
 
-  const numberFormatter = new Intl.NumberFormat(locale);
+  const relativeFormatter = new Intl.RelativeTimeFormat(locale, {
+    numeric: "always",
+    style: "short",
+  });
   const minuteMs = 60 * 1000;
   const hourMs = 60 * minuteMs;
   const dayMs = 24 * hourMs;
 
   if (diffMs < hourMs) {
     const minutes = Math.max(1, Math.floor(diffMs / minuteMs));
-    return `${numberFormatter.format(minutes)} min ago`;
+    return relativeFormatter.format(-minutes, "minute");
   }
   if (diffMs < dayMs) {
     const hours = Math.floor(diffMs / hourMs);
-    return `${numberFormatter.format(hours)} hr ago`;
+    return relativeFormatter.format(-hours, "hour");
   }
   if (diffMs <= 7 * dayMs) {
     const days = Math.floor(diffMs / dayMs);
-    return `${numberFormatter.format(days)} d ago`;
+    return relativeFormatter.format(-days, "day");
   }
 
   return absoluteDate;

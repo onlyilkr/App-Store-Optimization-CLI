@@ -11,15 +11,25 @@ import { checkVersionUpdateSync } from "./services/runtime/version-check-service
 import { reportBugsnagError } from "./services/telemetry/error-reporter";
 import { assertSupportedNodeVersion } from "./services/runtime/node-version-guard";
 import {
+  CliValidationError,
   emitStdoutRuntimeFailure,
   emitStdoutValidationFailure,
+  isCliValidationError,
   isStdoutKeywordsRun,
   toMachineReadableErrorMessage,
 } from "./services/runtime/stdout-contract";
+import {
+  shutdownPostHog,
+  trackCliStarted,
+} from "./services/telemetry/posthog-usage-tracking";
 
 assertSupportedNodeVersion();
 const processArgs = process.argv?.slice(2) || [];
 const stdoutKeywordsRun = isStdoutKeywordsRun(processArgs);
+const commandName =
+  typeof processArgs[0] === "string" && processArgs[0].trim()
+    ? processArgs[0].trim()
+    : "dashboard";
 
 const isDebugEnabled = process.env.NODE_ENV == "development";
 
@@ -34,31 +44,28 @@ if (isDebugEnabled) {
 }
 
 async function main() {
+  trackCliStarted({ command: commandName });
   checkVersionUpdateSync({ allowStdoutMessage: !stdoutKeywordsRun });
 
   const parser = yargs(hideBin(process.argv))
     .command(asoCmd)
     .strict()
-    .fail(async (msg, err) => {
+    .fail((msg, err) => {
       const failureMessage =
         (typeof msg === "string" && msg.trim()) ||
         toMachineReadableErrorMessage(err);
-      if (stdoutKeywordsRun) {
-        emitStdoutValidationFailure(failureMessage);
-      } else {
-        logger.error(
-          failureMessage,
-          "Use 'aso --help' to see available commands and options."
-        );
+      if (err) {
+        throw err;
       }
-      process.exit(1);
+      throw new CliValidationError(failureMessage);
     })
     .help();
 
   await parser.parseAsync();
+  await shutdownPostHog();
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   let command = "unknown";
 
   try {
@@ -70,7 +77,13 @@ main().catch((err) => {
   const processedError = processNestedErrors(err, false);
 
   if (stdoutKeywordsRun) {
-    emitStdoutRuntimeFailure(toMachineReadableErrorMessage(processedError));
+    if (isCliValidationError(err)) {
+      emitStdoutValidationFailure(err.message);
+    } else {
+      emitStdoutRuntimeFailure(toMachineReadableErrorMessage(processedError));
+    }
+  } else if (isCliValidationError(err)) {
+    logger.error(err.message, err.help);
   } else {
     logger.error(`Command '${command}' failed`, processedError);
   }
@@ -81,5 +94,6 @@ main().catch((err) => {
     command,
     context: processedError,
   });
+  await shutdownPostHog();
   process.exitCode = 1;
 });

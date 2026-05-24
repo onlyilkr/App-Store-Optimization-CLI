@@ -12,10 +12,10 @@ import { keywordPipelineService } from "../../services/keywords/keyword-pipeline
 import { chunkArray, getMissingOrExpiredAppIds } from "../refresh-utils";
 import {
   DEFAULT_ASO_COUNTRY,
-  normalizeCountry,
 } from "../../domain/keywords/policy";
 import type { AsoApiAppDoc, AsoRouteDeps } from "./aso-route-types";
 import { isStoredKeywordOrderFresh } from "../../shared/aso-keyword-validity";
+import { resolveCountryForProject } from "./country-resolver";
 
 const ASO_APP_DOCS_MAX_BATCH_SIZE = 50;
 const ASO_APP_SEARCH_DEFAULT_LIMIT = 20;
@@ -87,9 +87,10 @@ export async function fetchAsoAppDocsFromApi(
 export function createAppDocHandlers(deps: AsoRouteDeps) {
   async function handleApiAsoAppsSearchGet(
     res: http.ServerResponse,
-    query: Record<string, string>
+    query: Record<string, string>,
+    projectId: string
   ): Promise<void> {
-    const country = normalizeCountry(query.country);
+    const country = resolveCountryForProject(projectId);
     const term = (query.term ?? "").trim();
     const requestedLimit = Number.parseInt(
       query.limit ?? String(ASO_APP_SEARCH_DEFAULT_LIMIT),
@@ -214,9 +215,10 @@ export function createAppDocHandlers(deps: AsoRouteDeps) {
 
   async function handleApiAsoTopAppsGet(
     res: http.ServerResponse,
-    query: Record<string, string>
+    query: Record<string, string>,
+    projectId: string
   ): Promise<void> {
-    const country = normalizeCountry(query.country);
+    const country = resolveCountryForProject(projectId);
     const keyword = query.keyword ?? "";
     if (!keyword.trim()) {
       deps.sendApiError(res, 400, "INVALID_REQUEST", "Keyword is required.");
@@ -302,9 +304,10 @@ export function createAppDocHandlers(deps: AsoRouteDeps) {
 
   function handleApiAsoAppsGet(
     res: http.ServerResponse,
-    query: Record<string, string>
+    query: Record<string, string>,
+    projectId: string
   ): Promise<void> {
-    const country = normalizeCountry(query.country);
+    const country = resolveCountryForProject(projectId);
     const forceRefresh = deps.isTruthyQueryParam(query.refresh);
     const ids = Array.from(
       new Set(

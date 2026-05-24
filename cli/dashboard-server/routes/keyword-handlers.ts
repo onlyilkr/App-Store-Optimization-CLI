@@ -15,8 +15,9 @@ import {
   ASO_MAX_KEYWORDS,
   ASO_MAX_KEYWORDS_PER_REQUEST_ERROR,
 } from "../../shared/aso-keyword-limits";
-import { normalizeCountry, normalizeKeyword } from "../../domain/keywords/policy";
+import { normalizeKeyword } from "../../domain/keywords/policy";
 import type { AsoRouteDeps } from "./aso-route-types";
+import { resolveCountryForProject } from "./country-resolver";
 
 const DEFAULT_KEYWORDS_PAGE = 1;
 const DEFAULT_KEYWORDS_PAGE_SIZE = 100;
@@ -271,7 +272,8 @@ function buildPagedKeywordOrderClause(
 export function createKeywordHandlers(deps: AsoRouteDeps) {
   async function handleApiAsoKeywordsPost(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
+    projectId: string
   ): Promise<void> {
     const body = await deps.parseJsonBody<{
       appId?: string;
@@ -284,7 +286,10 @@ export function createKeywordHandlers(deps: AsoRouteDeps) {
     const appId = body.appId ?? DEFAULT_RESEARCH_APP_ID;
     const rawKeywords = body.keywords ?? [];
     const keywords = keywordPipelineService.normalizeKeywords(rawKeywords);
-    const country = normalizeCountry(body.country);
+    // Country is authoritatively resolved from the project record. Any
+    // UI-provided `body.country` is intentionally ignored so the server is the
+    // source of truth for storefront scoping.
+    const country = resolveCountryForProject(projectId);
     const startedAt = Date.now();
     if (keywords.length === 0) {
       deps.sendApiError(
@@ -514,7 +519,8 @@ export function createKeywordHandlers(deps: AsoRouteDeps) {
 
   async function handleApiAsoKeywordsDelete(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
+    projectId: string
   ): Promise<void> {
     const body = await deps.parseJsonBody<{
       appId?: string;
@@ -526,7 +532,7 @@ export function createKeywordHandlers(deps: AsoRouteDeps) {
     }
     const appId = body.appId ?? DEFAULT_RESEARCH_APP_ID;
     const keywords = body.keywords ?? [];
-    const country = normalizeCountry(body.country);
+    const country = resolveCountryForProject(projectId);
     const startedAt = Date.now();
     logger.debug("[aso-dashboard] request", {
       method: "DELETE",
@@ -583,7 +589,8 @@ export function createKeywordHandlers(deps: AsoRouteDeps) {
 
   async function handleApiAsoKeywordsRetryFailedPost(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
+    projectId: string
   ): Promise<void> {
     const body = await deps.parseJsonBody<{ appId?: string; country?: string }>(
       req,
@@ -593,7 +600,7 @@ export function createKeywordHandlers(deps: AsoRouteDeps) {
       return;
     }
     const appId = body.appId ?? DEFAULT_RESEARCH_APP_ID;
-    const country = normalizeCountry(body.country);
+    const country = resolveCountryForProject(projectId);
 
     if (deps.isDashboardAuthInProgress()) {
       deps.sendApiError(
@@ -646,7 +653,8 @@ export function createKeywordHandlers(deps: AsoRouteDeps) {
 
   async function handleApiAsoKeywordsFavoritePost(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
+    projectId: string
   ): Promise<void> {
     const body = await deps.parseJsonBody<{
       appId?: string;
@@ -659,7 +667,7 @@ export function createKeywordHandlers(deps: AsoRouteDeps) {
     }
     const appId = body.appId ?? DEFAULT_RESEARCH_APP_ID;
     const keyword = body.keyword?.trim() ?? "";
-    const country = normalizeCountry(body.country);
+    const country = resolveCountryForProject(projectId);
     if (!keyword) {
       deps.sendApiError(
         res,
@@ -714,11 +722,12 @@ export function createKeywordHandlers(deps: AsoRouteDeps) {
 
   function handleApiAsoKeywordHistoryGet(
     res: http.ServerResponse,
-    query: Record<string, string>
+    query: Record<string, string>,
+    projectId: string
   ): void {
     const appId = query.appId?.trim() ?? "";
     const normalizedKeyword = normalizeKeyword(query.keyword ?? "");
-    const country = normalizeCountry(query.country);
+    const country = resolveCountryForProject(projectId);
     if (!appId || !normalizedKeyword) {
       deps.sendApiError(
         res,
@@ -966,9 +975,10 @@ export function createKeywordHandlers(deps: AsoRouteDeps) {
 
   function handleApiAsoKeywordsGet(
     res: http.ServerResponse,
-    query: Record<string, string>
+    query: Record<string, string>,
+    projectId: string
   ): void {
-    const country = normalizeCountry(query.country);
+    const country = resolveCountryForProject(projectId);
     const appId = query.appId?.trim() ?? "";
     if (appId !== "") {
       handleApiAsoKeywordsGetPagedForApp(res, country, appId, query);

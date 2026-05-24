@@ -1,15 +1,20 @@
 import * as http from "http";
 import {
+  addAppToProject,
   deleteOwnedAppById,
   getOwnedAppById,
+  removeAppFromProject,
   upsertOwnedApps,
   upsertOwnedAppSnapshots,
 } from "../db/owned-apps";
+import { getProjectById } from "../db/projects";
 import { deleteAppKeywordsByAppId } from "../db/app-keywords";
 import {
   DEFAULT_RESEARCH_APP_ID,
   DEFAULT_RESEARCH_APP_NAME,
+  researchAppIdForProject,
 } from "../shared/aso-research";
+import { DEFAULT_PROJECT_ID } from "../shared/project-types";
 import type { OwnedAppSnapshot } from "./owned-app-details";
 
 type ManualAppAddRequest =
@@ -42,7 +47,7 @@ type CreateAppsHandlersDeps = {
     country: string,
     appIds: string[]
   ) => Promise<OwnedAppSnapshot[]>;
-  hydrationCountry: string;
+  resolveHydrationCountry: (projectId: string) => string;
 };
 
 type DeleteAppRequest = {
@@ -82,15 +87,29 @@ function nextResearchAppId(slug: string): string {
   }
 }
 
-export function ensureDefaultResearchAppExists(): void {
-  if (getOwnedAppById(DEFAULT_RESEARCH_APP_ID)) {
+export function ensureDefaultResearchAppExists(
+  projectId: string = DEFAULT_PROJECT_ID
+): void {
+  const researchId =
+    projectId === DEFAULT_PROJECT_ID
+      ? researchAppIdForProject(DEFAULT_PROJECT_ID)
+      : researchAppIdForProject(projectId);
+  if (getOwnedAppById(researchId)) {
+    return;
+  }
+  // Backfill: if legacy bare "research" row exists (pre-migration), skip seed.
+  if (
+    projectId === DEFAULT_PROJECT_ID &&
+    getOwnedAppById(DEFAULT_RESEARCH_APP_ID)
+  ) {
     return;
   }
   upsertOwnedApps([
     {
-      id: DEFAULT_RESEARCH_APP_ID,
+      id: researchId,
       kind: "research",
       name: DEFAULT_RESEARCH_APP_NAME,
+      projectId,
     },
   ]);
 }
@@ -98,7 +117,8 @@ export function ensureDefaultResearchAppExists(): void {
 export function createAppsHandlers(deps: CreateAppsHandlersDeps) {
   async function handleApiAppsPost(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
+    projectId: string = DEFAULT_PROJECT_ID
   ): Promise<void> {
     const body = await deps.parseJsonBody<ManualAppAddRequest>(req, res);
     if (!body) {
@@ -122,13 +142,17 @@ export function createAppsHandlers(deps: CreateAppsHandlersDeps) {
         return;
       }
 
-      const country = deps.hydrationCountry;
-      upsertOwnedApps([{ id: appId, kind: "owned", name: appId }]);
+      const country = deps.resolveHydrationCountry(projectId);
+      upsertOwnedApps([{ id: appId, kind: "owned", name: appId, projectId }]);
+      addAppToProject(appId, projectId);
       let hydratedName = appId;
       try {
         const snapshots = await deps.fetchOwnedAppSnapshotsFromApi(country, [appId]);
         if (snapshots.length > 0) {
-          upsertOwnedAppSnapshots(country, snapshots);
+          upsertOwnedAppSnapshots(
+            country,
+            snapshots.map((snapshot) => ({ ...snapshot, projectId }))
+          );
           const first = snapshots[0];
           if (first?.name?.trim()) {
             hydratedName = first.name.trim();
@@ -141,6 +165,7 @@ export function createAppsHandlers(deps: CreateAppsHandlersDeps) {
           phase: "manual-app-hydration",
           appId,
           country,
+          projectId,
         });
       }
 
@@ -161,9 +186,10 @@ export function createAppsHandlers(deps: CreateAppsHandlersDeps) {
     }
 
     const slug = slugifyResearchName(name);
-    ensureDefaultResearchAppExists();
+    ensureDefaultResearchAppExists(projectId);
     const id = nextResearchAppId(slug);
-    upsertOwnedApps([{ id, kind: "research", name }]);
+    upsertOwnedApps([{ id, kind: "research", name, projectId }]);
+    addAppToProject(id, projectId);
     deps.sendJson(res, 201, {
       success: true,
       data: {
@@ -175,7 +201,8 @@ export function createAppsHandlers(deps: CreateAppsHandlersDeps) {
 
   async function handleApiAppsDelete(
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
+    projectId: string = DEFAULT_PROJECT_ID
   ): Promise<void> {
     const body = await deps.parseJsonBody<DeleteAppRequest>(req, res);
     if (!body) {
@@ -198,17 +225,27 @@ export function createAppsHandlers(deps: CreateAppsHandlersDeps) {
       return;
     }
 
-    const existing = getOwnedAppById(appId, deps.hydrationCountry);
+    const country = deps.resolveHydrationCountry(projectId);
+    const existing = getOwnedAppById(appId, country);
     if (!existing) {
       deps.sendApiError(res, 404, "NOT_FOUND", "App not found.");
       return;
     }
 
-    const removedKeywordCount = deleteAppKeywordsByAppId(appId);
-    const removedAppCount = deleteOwnedAppById(appId);
-    if (removedAppCount === 0) {
-      deps.sendApiError(res, 404, "NOT_FOUND", "App not found.");
-      return;
+    // Remove the app from the current project. If no other project still
+    // lists it, fully delete the app + keyword data. This lets an app live
+    // in multiple projects at once.
+    const { remainingProjects } = removeAppFromProject(appId, projectId);
+    let removedKeywordCount = 0;
+    let fullyDeleted = false;
+    if (remainingProjects === 0) {
+      removedKeywordCount = deleteAppKeywordsByAppId(appId);
+      const removedAppCount = deleteOwnedAppById(appId);
+      if (removedAppCount === 0) {
+        deps.sendApiError(res, 404, "NOT_FOUND", "App not found.");
+        return;
+      }
+      fullyDeleted = true;
     }
 
     deps.sendJson(res, 200, {
@@ -216,6 +253,62 @@ export function createAppsHandlers(deps: CreateAppsHandlersDeps) {
       data: {
         id: appId,
         removedKeywordCount,
+        fullyDeleted,
+        remainingProjects,
+      },
+    });
+  }
+
+  async function handleApiAppPatch(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    appId: string
+  ): Promise<void> {
+    const body = await deps.parseJsonBody<{ projectId?: string }>(req, res);
+    if (!body) return;
+    const normalized = normalizeAppId(appId);
+    if (!normalized) {
+      deps.sendApiError(res, 400, "INVALID_REQUEST", "App ID is required.");
+      return;
+    }
+    const targetProjectId =
+      typeof body.projectId === "string" ? body.projectId.trim() : "";
+    if (!targetProjectId) {
+      deps.sendApiError(
+        res,
+        400,
+        "INVALID_REQUEST",
+        "projectId is required in the request body."
+      );
+      return;
+    }
+    const project = getProjectById(targetProjectId);
+    if (!project) {
+      deps.sendApiError(res, 404, "PROJECT_NOT_FOUND", "Project not found.");
+      return;
+    }
+    const country = deps.resolveHydrationCountry(project.id);
+    const existing = getOwnedAppById(normalized, country);
+    if (!existing) {
+      deps.sendApiError(res, 404, "NOT_FOUND", "App not found.");
+      return;
+    }
+    if (existing.kind === "research") {
+      deps.sendApiError(
+        res,
+        400,
+        "INVALID_REQUEST",
+        "Research apps cannot be moved between projects."
+      );
+      return;
+    }
+    const added = addAppToProject(normalized, project.id);
+    deps.sendJson(res, 200, {
+      success: true,
+      data: {
+        id: normalized,
+        projectId: project.id,
+        addedMembership: added,
       },
     });
   }
@@ -223,5 +316,6 @@ export function createAppsHandlers(deps: CreateAppsHandlersDeps) {
   return {
     handleApiAppsPost,
     handleApiAppsDelete,
+    handleApiAppPatch,
   };
 }

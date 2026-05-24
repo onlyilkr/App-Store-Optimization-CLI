@@ -28,6 +28,11 @@ import {
   refreshAsoKeywordOrderLocal,
 } from "../services/keywords/aso-local-cache-service";
 import { getDb } from "../db/store";
+import {
+  getProjectById,
+  getProjectCountry,
+  listDistinctProjectCountries,
+} from "../db/projects";
 import { asoAuthService } from "../services/auth/aso-auth-service";
 import { keywordPipelineService } from "../services/keywords/keyword-pipeline-service";
 import { isAsoAuthReauthRequiredError } from "../services/keywords/aso-popularity-service";
@@ -42,6 +47,12 @@ jest.mock("../db/owned-apps", () => ({
   listOwnedApps: jest.fn(() => []),
   upsertOwnedApps: jest.fn(),
   upsertOwnedAppSnapshots: jest.fn(),
+  addAppToProject: jest.fn(() => true),
+  removeAppFromProject: jest.fn(() => ({
+    removed: true,
+    remainingProjects: 0,
+  })),
+  listAppProjectIds: jest.fn(() => []),
 }));
 
 jest.mock("../db/app-keywords", () => ({
@@ -137,6 +148,16 @@ jest.mock("../db/store", () => ({
 
 jest.mock("./owned-app-details", () => ({
   fetchOwnedAppSnapshotsFromApi: jest.fn(async () => []),
+}));
+
+jest.mock("../db/projects", () => ({
+  getProjectById: jest.fn(() => null),
+  getProjectCountry: jest.fn(() => "US"),
+  listDistinctProjectCountries: jest.fn(() => ["US"]),
+}));
+
+jest.mock("../db/metadata", () => ({
+  setMetadataValue: jest.fn(),
 }));
 
 jest.mock("../utils/logger", () => ({
@@ -252,6 +273,11 @@ describe("dashboard server routes", () => {
   const mockGetCompetitorAppDocs = jest.mocked(getCompetitorAppDocs);
   const mockUpsertCompetitorAppDocs = jest.mocked(upsertCompetitorAppDocs);
   const mockFetchOwnedAppSnapshotsFromApi = jest.mocked(fetchOwnedAppSnapshotsFromApi);
+  const mockGetProjectById = jest.mocked(getProjectById);
+  const mockGetProjectCountry = jest.mocked(getProjectCountry);
+  const mockListDistinctProjectCountries = jest.mocked(
+    listDistinctProjectCountries
+  );
   const mockGetAsoAppDocsLocal = jest.mocked(getAsoAppDocsLocal);
   const mockRefreshAsoKeywordOrderLocal = jest.mocked(refreshAsoKeywordOrderLocal);
   const mockReAuthenticate = jest.mocked(asoAuthService.reAuthenticate);
@@ -284,6 +310,9 @@ describe("dashboard server routes", () => {
     mockGetKeyword.mockReturnValue(null);
     mockGetCompetitorAppDocs.mockReturnValue([]);
     mockFetchOwnedAppSnapshotsFromApi.mockResolvedValue([]);
+    mockGetProjectById.mockReturnValue(null);
+    mockGetProjectCountry.mockReturnValue("US" as any);
+    mockListDistinctProjectCountries.mockReturnValue(["US"] as any);
     mockUpsertOwnedAppSnapshots.mockImplementation(() => {});
     mockGetAsoAppDocsLocal.mockResolvedValue([]);
     mockRefreshAsoKeywordOrderLocal.mockResolvedValue({
@@ -337,8 +366,49 @@ describe("dashboard server routes", () => {
     expect(response.json?.data).toEqual(
       expect.objectContaining({
         status: expect.any(String),
+        byCountry: expect.any(Array),
       })
     );
+  });
+
+  it("starts startup refresh on demand", async () => {
+    const response = await request({
+      method: "POST",
+      path: "/api/aso/refresh/start",
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json?.success).toBe(true);
+    expect(response.json?.data).toEqual(
+      expect.objectContaining({
+        status: expect.any(String),
+        byCountry: expect.any(Array),
+      })
+    );
+  });
+
+  it("fans out refresh status across distinct project countries", async () => {
+    mockListDistinctProjectCountries.mockReturnValue(["US", "TR"] as any);
+
+    const startResponse = await request({
+      method: "POST",
+      path: "/api/aso/refresh/start",
+    });
+    expect(startResponse.statusCode).toBe(202);
+    const startCountries = (startResponse.json?.data?.byCountry ?? []).map(
+      (s: { country: string }) => s.country
+    );
+    expect(new Set(startCountries)).toEqual(new Set(["US", "TR"]));
+
+    const statusResponse = await request({
+      method: "GET",
+      path: "/api/aso/refresh-status",
+    });
+    expect(statusResponse.statusCode).toBe(200);
+    const statusCountries = (statusResponse.json?.data?.byCountry ?? []).map(
+      (s: { country: string }) => s.country
+    );
+    expect(new Set(statusCountries)).toEqual(new Set(["US", "TR"]));
   });
 
   it("returns apps sorted and ensures default research app", async () => {
@@ -357,7 +427,12 @@ describe("dashboard server routes", () => {
 
     expect(response.statusCode).toBe(200);
     expect(mockUpsertOwnedApps).toHaveBeenCalledWith([
-      { id: DEFAULT_RESEARCH_APP_ID, kind: "research", name: "Research" },
+      {
+        id: "research:default",
+        kind: "research",
+        name: "Research",
+        projectId: "default",
+      },
     ]);
     expect(response.json?.data.map((item: any) => item.id)).toEqual(["2", "1"]);
   });
@@ -415,6 +490,8 @@ describe("dashboard server routes", () => {
       data: {
         id: "123",
         removedKeywordCount: 3,
+        fullyDeleted: true,
+        remainingProjects: 0,
       },
     });
   });
@@ -450,7 +527,7 @@ describe("dashboard server routes", () => {
 
   it("creates research app with slug collision suffix", async () => {
     mockGetOwnedAppById.mockImplementation((id: string) => {
-      if (id === DEFAULT_RESEARCH_APP_ID) return { id, name: "Research" } as any;
+      if (id === "research:default") return { id, name: "Research" } as any;
       if (id === "research:my-ideas") return { id, name: "My Ideas" } as any;
       return null;
     });
@@ -470,7 +547,12 @@ describe("dashboard server routes", () => {
       },
     });
     expect(mockUpsertOwnedApps).toHaveBeenCalledWith([
-      { id: "research:my-ideas-2", kind: "research", name: "My Ideas" },
+      {
+        id: "research:my-ideas-2",
+        kind: "research",
+        name: "My Ideas",
+        projectId: "default",
+      },
     ]);
   });
 
@@ -500,7 +582,7 @@ describe("dashboard server routes", () => {
       },
     });
     expect(mockUpsertOwnedApps).toHaveBeenCalledWith([
-      { id: "123", kind: "owned", name: "123" },
+      { id: "123", kind: "owned", name: "123", projectId: "default" },
     ]);
     expect(mockUpsertOwnedAppSnapshots).toHaveBeenCalledWith("US", [
       {
@@ -509,11 +591,12 @@ describe("dashboard server routes", () => {
         averageUserRating: 4.4,
         userRatingCount: 100,
         expiresAt: "2099-01-01T00:00:00.000Z",
+        projectId: "default",
       },
     ]);
   });
 
-  it("returns auth status and tty-required auth-start error", async () => {
+  it("returns auth status and starts dashboard auth without requiring a tty", async () => {
     const status = await request({
       method: "GET",
       path: "/api/aso/auth/status",
@@ -530,8 +613,13 @@ describe("dashboard server routes", () => {
       method: "POST",
       path: "/api/aso/auth/start",
     });
-    expect(start.statusCode).toBe(503);
-    expect(start.json?.errorCode).toBe("TTY_REQUIRED");
+    expect(start.statusCode).toBe(202);
+    expect(start.json?.data).toEqual(
+      expect.objectContaining({
+        status: "in_progress",
+        pendingPrompt: null,
+      })
+    );
   });
 
   it("returns auth-in-progress when auth start is requested concurrently", async () => {
@@ -573,6 +661,65 @@ describe("dashboard server routes", () => {
         Object.defineProperty(process.stdout, "isTTY", stdoutDescriptor);
       }
     }
+  });
+
+  it("does not treat prompt responses as invalid while auth is between steps", async () => {
+    let allowAuthToFinish: (() => void) | null = null;
+    mockReAuthenticate.mockImplementation(
+      async (options?: any) => {
+        await options?.promptHandler?.prompt({
+          kind: "verification_code",
+          title: "Verification Code Required",
+          message: "Enter code",
+          digits: 6,
+        });
+        await new Promise<void>((resolve) => {
+          allowAuthToFinish = resolve;
+        });
+        return "ok";
+      }
+    );
+
+    const start = await request({
+      method: "POST",
+      path: "/api/aso/auth/start",
+    });
+    expect(start.statusCode).toBe(202);
+
+    const firstRespond = await request({
+      method: "POST",
+      path: "/api/aso/auth/respond",
+      body: {
+        kind: "verification_code",
+        code: "123456",
+      },
+    });
+    expect(firstRespond.statusCode).toBe(202);
+    expect(firstRespond.json?.data).toEqual(
+      expect.objectContaining({
+        status: "in_progress",
+      })
+    );
+
+    const secondRespond = await request({
+      method: "POST",
+      path: "/api/aso/auth/respond",
+      body: {
+        kind: "verification_code",
+        code: "123456",
+      },
+    });
+    expect(secondRespond.statusCode).toBe(202);
+    expect(secondRespond.json?.data).toEqual(
+      expect.objectContaining({
+        status: "in_progress",
+        pendingPrompt: null,
+      })
+    );
+
+    const releaseAuth = allowAuthToFinish as (() => void) | null;
+    releaseAuth?.();
+    await new Promise((resolve) => setImmediate(resolve));
   });
 
   it("returns keywords with app-specific positions and failure metadata", async () => {
@@ -1340,6 +1487,27 @@ describe("dashboard server routes", () => {
     expect(networkError.json?.errorCode).toBe("NETWORK_ERROR");
   });
 
+  it("maps inaccessible Primary App ID errors to the reconfigure error code", async () => {
+    mockFetchKeywordStage.mockRejectedValueOnce(
+      new Error(
+        "Primary App ID 345345 is not accessible for this Apple Ads account. (messageCode=NO_USER_OWNED_APPS_FOUND_CODE)"
+      )
+    );
+
+    const response = await request({
+      method: "POST",
+      path: "/api/aso/keywords",
+      body: {
+        appId: "app-1",
+        country: "US",
+        keywords: ["term"],
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json?.errorCode).toBe("PRIMARY_APP_ID_RECONFIGURE_REQUIRED");
+  });
+
   it("returns auth-required for keyword routes when reauth is required", async () => {
     mockIsAsoAuthReauthRequiredError.mockReturnValue(true);
     mockFetchKeywordStage.mockRejectedValue(new Error("session expired"));
@@ -1394,5 +1562,93 @@ describe("dashboard server routes", () => {
     });
     expect(notFoundApi.statusCode).toBe(404);
     expect(notFoundApi.text).toContain("Not found");
+  });
+
+  it("DELETE /api/aso/keywords?projectId=<tr-project> uses TR country, ignoring UI-sent US", async () => {
+    mockGetProjectById.mockImplementation((id: string) =>
+      id === "tr-test-99"
+        ? ({ id: "tr-test-99", name: "TR-Test-99", country: "TR" } as any)
+        : null
+    );
+    mockGetProjectCountry.mockImplementation((id: string) =>
+      (id === "tr-test-99" ? "TR" : "US") as any
+    );
+    mockDeleteAppKeywords.mockReturnValue(1);
+
+    const response = await request({
+      method: "DELETE",
+      path: "/api/aso/keywords?projectId=tr-test-99",
+      // UI deliberately sends country=US to verify the server overrides it.
+      body: { appId: "app-1", country: "US", keywords: ["term"] },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mockGetProjectCountry).toHaveBeenCalledWith("tr-test-99");
+    expect(mockDeleteAppKeywords).toHaveBeenCalledWith(
+      "app-1",
+      ["term"],
+      "TR"
+    );
+  });
+
+  it("POST /api/aso/keywords/favorite?projectId=<tr-project> uses TR country, ignoring UI-sent US", async () => {
+    mockGetProjectById.mockImplementation((id: string) =>
+      id === "tr-test-99"
+        ? ({ id: "tr-test-99", name: "TR-Test-99", country: "TR" } as any)
+        : null
+    );
+    mockGetProjectCountry.mockImplementation((id: string) =>
+      (id === "tr-test-99" ? "TR" : "US") as any
+    );
+    mockSetAppKeywordFavorite.mockReturnValue(true);
+
+    const response = await request({
+      method: "POST",
+      path: "/api/aso/keywords/favorite?projectId=tr-test-99",
+      body: {
+        appId: "app-1",
+        country: "US",
+        keyword: "term",
+        isFavorite: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mockSetAppKeywordFavorite).toHaveBeenCalledWith(
+      "app-1",
+      "term",
+      true,
+      "TR"
+    );
+  });
+
+  it("POST /api/apps?projectId=<tr-project> hydrates with TR storefront", async () => {
+    mockGetProjectById.mockImplementation((id: string) =>
+      id === "tr-test-12"
+        ? ({ id: "tr-test-12", name: "TR-Test-12", country: "TR" } as any)
+        : null
+    );
+    mockGetProjectCountry.mockImplementation((id: string) =>
+      (id === "tr-test-12" ? "TR" : "US") as any
+    );
+
+    let capturedCountry: string | null = null;
+    mockFetchOwnedAppSnapshotsFromApi.mockImplementation(
+      async (country: string) => {
+        capturedCountry = country;
+        return [];
+      }
+    );
+
+    const response = await request({
+      method: "POST",
+      path: "/api/apps?projectId=tr-test-12",
+      body: { type: "app", appId: "1234567890" },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(mockFetchOwnedAppSnapshotsFromApi).toHaveBeenCalled();
+    expect(capturedCountry).toBe("TR");
+    expect(mockGetProjectCountry).toHaveBeenCalledWith("tr-test-12");
   });
 });

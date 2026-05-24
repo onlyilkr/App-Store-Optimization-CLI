@@ -1,3 +1,8 @@
+import {
+  isSupportedCountry,
+  SUPPORTED_COUNTRIES,
+} from "../../shared/aso-storefronts";
+
 export const DEFAULT_ASO_COUNTRY = "US" as const;
 
 export function normalizeKeyword(keyword: string): string {
@@ -20,7 +25,10 @@ export function normalizeCountry(input: string | undefined | null): string {
 }
 
 export function assertSupportedCountry(country: string): void {
-  if (normalizeCountry(country) !== DEFAULT_ASO_COUNTRY) {
-    throw new Error("Only US is supported for now");
+  const normalized = normalizeCountry(country);
+  if (!isSupportedCountry(normalized)) {
+    throw new Error(
+      `Unsupported country "${country}". Supported: ${[...SUPPORTED_COUNTRIES].join(", ")}`
+    );
   }
 }

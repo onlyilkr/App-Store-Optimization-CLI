@@ -8,11 +8,18 @@ import {
   fetchAppStoreAdditionalLocalizations,
   fetchAppStoreLocalizedAppData,
 } from "./aso-app-store-details";
+import { normalizeCountryOnAppDocs } from "./aso-app-doc-utils";
 import { fetchAppStoreLookupAppDocs } from "./aso-app-doc-service";
 import type { AsoAppDoc, AsoAppDocIcon } from "./aso-types";
 import { asoAppleGet } from "./aso-apple-client";
 import { reportAppleContractChange } from "../../keywords/apple-http-trace";
 import { getStorefrontDefaultLanguage } from "../../../shared/aso-storefront-localizations";
+import {
+  getAppStoreDslangCookieHeader,
+  getAppStoreUrlSegment,
+  getStorefrontConfig,
+} from "../../../shared/aso-storefronts";
+import { ASO_APPLE_WEB_USER_AGENT } from "../../../shared/aso-apple-http";
 import type { KeywordMatchType } from "../../../shared/aso-keyword-match";
 import {
   calculateAppDifficultyBreakdown,
@@ -56,6 +63,8 @@ interface AmpSearchResponse {
       shelves?: Array<{
         contentType?: string;
         items?: Array<{
+          $kind?: string;
+          resultType?: string;
           lockup?: AmpSearchLockup;
         }>;
       }>;
@@ -70,15 +79,46 @@ interface AmpSearchResponse {
 }
 
 const MZSEARCH_PLATFORM_ID_JSON = 29;
-const STORE_FRONT_ID_BY_COUNTRY: Record<string, number> = {
-  US: 143441,
-};
-const DEFAULT_APPLE_WEB_USER_AGENT =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15";
 const MZSEARCH_ORDER_URL = "https://search.itunes.apple.com/WebObjects/MZSearch.woa/wa/search";
-const APPSTORE_SEARCH_URL = "https://apps.apple.com/us/iphone/search";
 const INSUFFICIENT_DOCS_RETRY_COUNT = 1;
 const INSUFFICIENT_DOCS_RETRY_BACKOFF_MS = 150;
+const INCOMPLETE_TOP_DOC_LOOKUP_COOLDOWN_MS = 10 * 60 * 1000;
+const incompleteTopDocLookupCooldownUntilByAppId = new Map<string, number>();
+
+function isIncompleteTopDocLookupOnCooldown(
+  appId: string,
+  nowMs: number = Date.now()
+): boolean {
+  const cooldownUntil = incompleteTopDocLookupCooldownUntilByAppId.get(appId);
+  if (cooldownUntil == null) return false;
+  if (cooldownUntil <= nowMs) {
+    incompleteTopDocLookupCooldownUntilByAppId.delete(appId);
+    return false;
+  }
+  return true;
+}
+
+function markIncompleteTopDocLookupCooldown(
+  appIds: string[],
+  nowMs: number = Date.now()
+): void {
+  if (appIds.length === 0) return;
+  const cooldownUntil = nowMs + INCOMPLETE_TOP_DOC_LOOKUP_COOLDOWN_MS;
+  for (const appId of appIds) {
+    incompleteTopDocLookupCooldownUntilByAppId.set(appId, cooldownUntil);
+  }
+}
+
+function clearIncompleteTopDocLookupCooldown(appIds: string[]): void {
+  if (appIds.length === 0) return;
+  for (const appId of appIds) {
+    incompleteTopDocLookupCooldownUntilByAppId.delete(appId);
+  }
+}
+
+export function __resetIncompleteTopDocLookupCooldownForTests(): void {
+  incompleteTopDocLookupCooldownUntilByAppId.clear();
+}
 
 class InsufficientDifficultyDocsError extends Error {
   readonly code = "INSUFFICIENT_DOCS";
@@ -262,8 +302,12 @@ function appCompetitiveScore(app: AsoAppDoc, keyword: string): number {
 }
 
 function getStoreFrontHeader(country: string): string {
-  const storeId = STORE_FRONT_ID_BY_COUNTRY[country.toUpperCase()] || 143441;
-  return `${storeId}-1,${MZSEARCH_PLATFORM_ID_JSON}`;
+  const config = getStorefrontConfig(country);
+  return `${config.storefrontId}-1,${MZSEARCH_PLATFORM_ID_JSON}`;
+}
+
+function getAppStoreSearchUrl(country: string): string {
+  return `https://apps.apple.com/${getAppStoreUrlSegment(country)}/iphone/search`;
 }
 
 async function fetchPopularityOrderedIds(params: {
@@ -279,10 +323,9 @@ async function fetchPopularityOrderedIds(params: {
         term: params.keyword,
       },
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
-        "Accept-Language": "en-US,en;q=0.9",
-        Cookie: "dslang=US-EN",
+        "User-Agent": ASO_APPLE_WEB_USER_AGENT,
+        "Accept-Language": getStorefrontConfig(params.country).acceptLanguage,
+        Cookie: getAppStoreDslangCookieHeader(params.country),
         "x-apple-store-front": getStoreFrontHeader(params.country),
       },
       timeout: 30000,
@@ -366,6 +409,18 @@ function lockupToAppDoc(lockup: AmpSearchLockup, country: string): AsoAppDoc | n
   };
 }
 
+function isAppLikeSearchResultItem(item: {
+  $kind?: string;
+  resultType?: string;
+}): boolean {
+  const kind = (item.$kind ?? "").trim();
+  const resultType = (item.resultType ?? "").trim().toLowerCase();
+  if (kind === "BundleSearchResult" || resultType === "bundle") {
+    return false;
+  }
+  return true;
+}
+
 async function fetchSearchPageOrderedData(params: {
   keyword: string;
   country: string;
@@ -373,13 +428,13 @@ async function fetchSearchPageOrderedData(params: {
   orderedAppIds: string[];
   appDocs: AsoAppDoc[];
 }> {
-  const response = await asoAppleGet(APPSTORE_SEARCH_URL, {
+  const response = await asoAppleGet(getAppStoreSearchUrl(params.country), {
     operation: "appstore.search-page",
     params: { term: params.keyword },
     headers: {
-      "User-Agent": DEFAULT_APPLE_WEB_USER_AGENT,
+      "User-Agent": ASO_APPLE_WEB_USER_AGENT,
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9",
+      "Accept-Language": getStorefrontConfig(params.country).acceptLanguage,
     },
     timeout: 30000,
   });
@@ -401,6 +456,9 @@ async function fetchSearchPageOrderedData(params: {
   const appDocs: AsoAppDoc[] = [];
   const leadingOrderedIds: string[] = [];
   for (const item of searchShelf?.items || []) {
+    if (!isAppLikeSearchResultItem(item)) {
+      continue;
+    }
     const lockup = item?.lockup;
     if (!lockup) continue;
     const doc = lockupToAppDoc(lockup, params.country);
@@ -459,7 +517,7 @@ export async function refreshKeywordOrder(params: {
     reportAppleContractChange({
       provider: "apple-appstore",
       operation: "appstore.search-page",
-      endpoint: APPSTORE_SEARCH_URL,
+      endpoint: getAppStoreSearchUrl(country),
       expectedContract:
         "Search page includes serialized-server-data with ordered app ids",
       actualSignal: htmlMessage,
@@ -556,7 +614,15 @@ async function buildAppDocsFromLookup(params: {
       country: params.country,
       appIds: params.appIds,
     });
-  } catch {
+  } catch (error) {
+    // Don't crash the enrichment pipeline if app-doc lookup fails entirely,
+    // but log it so real Apple outages surface in telemetry instead of
+    // silently degrading to "no difficulty data".
+    logger.debug("[aso-enrichment] app-doc lookup failed; difficulty will be unavailable", {
+      country: params.country,
+      appIdsCount: params.appIds.length,
+      message: error instanceof Error ? error.message : String(error),
+    });
     lookupDocs = [];
   }
 
@@ -614,14 +680,6 @@ function mergeSearchFieldsIntoAppDoc(
     userRatingCount: searchDoc.userRatingCount,
     icon: searchDoc.icon,
   };
-}
-
-function normalizeCountryOnAppDocs(country: string, appDocs: AsoAppDoc[]): AsoAppDoc[] {
-  const normalizedCountry = country.toUpperCase();
-  return appDocs.map((doc) => ({
-    ...doc,
-    country: normalizedCountry,
-  }));
 }
 
 async function hydrateMissingAdditionalLocalizations(params: {
@@ -763,14 +821,32 @@ async function backfillMissingTopDifficultyDocs(params: {
   }
 
   if (missingTopIds.length > 0) {
-    const lookedUpDocs = normalizeCountryOnAppDocs(
-      params.country,
-      await buildAppDocsFromLookup({
-        appIds: missingTopIds,
-        country: params.country,
-      })
+    const nowMs = Date.now();
+    const lookupEligibleMissingTopIds = missingTopIds.filter(
+      (appId) => !isIncompleteTopDocLookupOnCooldown(appId, nowMs)
     );
-    mergedDocs = mergeAppDocsById(mergedDocs, lookedUpDocs);
+    if (lookupEligibleMissingTopIds.length > 0) {
+      const lookedUpDocs = normalizeCountryOnAppDocs(
+        params.country,
+        await buildAppDocsFromLookup({
+          appIds: lookupEligibleMissingTopIds,
+          country: params.country,
+        })
+      );
+      mergedDocs = mergeAppDocsById(mergedDocs, lookedUpDocs);
+      missingTopIds = listIncompleteTopDifficultyDocIds({
+        orderedAppIds: params.orderedAppIds,
+        appDocs: mergedDocs,
+      });
+      const unresolvedLookups = lookupEligibleMissingTopIds.filter((appId) =>
+        missingTopIds.includes(appId)
+      );
+      markIncompleteTopDocLookupCooldown(unresolvedLookups, nowMs);
+    }
+    const resolvedTopIds = params.orderedAppIds
+      .slice(0, TOP_DIFFICULTY_DOC_LIMIT)
+      .filter((appId) => !missingTopIds.includes(appId));
+    clearIncompleteTopDocLookupCooldown(resolvedTopIds);
   }
 
   return reorderAppDocsForTopDifficultyIds({
@@ -832,7 +908,7 @@ export async function enrichKeyword(
     reportAppleContractChange({
       provider: "apple-appstore",
       operation: "appstore.search-page",
-      endpoint: APPSTORE_SEARCH_URL,
+      endpoint: getAppStoreSearchUrl(country),
       expectedContract:
         "Search page includes serialized-server-data with ordered app ids and lockups",
       actualSignal: htmlMessage,
@@ -879,12 +955,13 @@ export async function enrichKeyword(
       const searchDoc = searchDocByAppId.get(id);
       if (!searchDoc) return false;
       const c = cachedByAppId.get(id);
-      return (
-        !c ||
-        Date.parse(c.expiresAt ?? "0") <= now ||
-        !c.releaseDate ||
-        !c.currentVersionReleaseDate
-      );
+      const hasStaleOrMissingCache = !c || Date.parse(c.expiresAt ?? "0") <= now;
+      const hasIncompleteDifficultyFields =
+        c != null && (!c.releaseDate || !c.currentVersionReleaseDate);
+      if (!hasStaleOrMissingCache && !hasIncompleteDifficultyFields) {
+        return false;
+      }
+      return !isIncompleteTopDocLookupOnCooldown(id, now);
     });
     const lookupDetailsByAppId =
       idsThatNeedLookup.length > 0
@@ -1097,3 +1174,8 @@ export async function enrichKeyword(
     appDocs,
   };
 }
+
+export const __testing__ = {
+  getStoreFrontHeader,
+  getAppStoreSearchUrl,
+};

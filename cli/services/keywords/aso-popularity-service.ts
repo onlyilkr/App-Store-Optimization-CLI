@@ -1,8 +1,9 @@
 import { ContextualError } from "../../utils/error-handling-helpers";
 import { logger } from "../../utils/logger";
 import { asoAuthService } from "../auth/aso-auth-service";
-import { getSavedAsoAdamId } from "./aso-adam-id-service";
+import { getConfiguredAsoAdamId } from "./aso-adam-id-service";
 import {
+  NO_ORG_TRANSLATED_INTERNAL_CODE,
   requestPopularitiesWithKwsRetry,
   type PopularityResponse,
 } from "./aso-apple-popularity-client";
@@ -59,7 +60,7 @@ function sanitizeKeyword(keyword: string): string {
 }
 
 function requireAdamId(): string {
-  const adamId = getSavedAsoAdamId();
+  const adamId = getConfiguredAsoAdamId();
   if (!adamId) {
     throw new ContextualError(
       "Primary App ID is missing. Run 'aso --primary-app-id <id>' or run 'aso' to set it."
@@ -134,12 +135,20 @@ function logPopularityResponse(
 
 export class AsoPopularityService {
   async fetchKeywordPopularitiesWithFailures(
+    country: string,
     keywords: string[],
     options?: FetchKeywordPopularitiesOptions
   ): Promise<KeywordPopularityResult> {
     if (keywords.length > ASO_MAX_KEYWORDS) {
       throw new ContextualError(ASO_MAX_KEYWORDS_PER_CALL_ERROR);
     }
+    // Always opt into the synthesized-null degradation. The previous
+    // `country !== "US"` heuristic encoded the assumption that only US
+    // accounts have org access — wrong axis. A US developer without
+    // Search Ads org access deserves the same graceful degradation as a
+    // TR developer; both end up with popularity:null (sentinel-encoded
+    // downstream as 0) so the order/difficulty stages still run.
+    const treatNoOrgAsNull = true;
 
     const sanitizedToOriginal = new Map<string, string>();
     for (const keyword of keywords) {
@@ -177,7 +186,8 @@ export class AsoPopularityService {
     }
     const requestWithAuthRecovery = async (
       terms: string[],
-      stageLabel: string
+      stageLabel: string,
+      options?: { maxAttempts?: number }
     ): Promise<{ statusCode: number; data: PopularityResponse; attempts: number }> => {
       logger.debug(
         `[aso-popularity] sending ${stageLabel} request cookieHeaderLength=${cookieHeader.length} terms=${terms.length}`
@@ -185,7 +195,9 @@ export class AsoPopularityService {
       let response = await requestPopularitiesWithKwsRetry(
         terms,
         cookieHeader,
-        adamId
+        adamId,
+        country,
+        { ...(options ?? {}), treatNoOrgAsNull }
       );
       logPopularityResponse(stageLabel, response.statusCode, response.data);
 
@@ -202,7 +214,9 @@ export class AsoPopularityService {
         response = await requestPopularitiesWithKwsRetry(
           terms,
           cookieHeader,
-          adamId
+          adamId,
+          country,
+          { ...(options ?? {}), treatNoOrgAsNull }
         );
         logPopularityResponse(
           `${stageLabel}-post-reauth`,
@@ -252,17 +266,31 @@ export class AsoPopularityService {
         return result;
       }
 
+      // Distinguish synthesized null (from treatNoOrgAsNull translating a
+      // 403 KWS_NO_ORG_CONTENT_PROVIDERS into a fake 200) from a genuine
+      // null in a real Apple response. The synthesized case marks itself
+      // with NO_ORG_TRANSLATED_INTERNAL_CODE so we can persist 0 here as
+      // the "no-storefront-access" sentinel and keep order/difficulty
+      // stages running. A genuine null from a real Apple response keeps
+      // the pre-existing US behavior (skip, leave the keyword pending so
+      // it can be retried).
+      const isSynthesizedNoOrg =
+        response.data.internalErrorCode === NO_ORG_TRANSLATED_INTERNAL_CODE;
       let invalidItemCount = 0;
       for (const item of response.data.data || []) {
         if (!item || typeof item.name !== "string") {
           invalidItemCount += 1;
           continue;
         }
-        if (item.popularity === null) continue;
         const originalKeyword = sanitizedToOriginal.get(item.name);
-        if (originalKeyword) {
-          result[originalKeyword] = item.popularity;
+        if (!originalKeyword) continue;
+        if (item.popularity === null) {
+          if (isSynthesizedNoOrg) {
+            result[originalKeyword] = 0;
+          }
+          continue;
         }
+        result[originalKeyword] = item.popularity;
       }
       if (invalidItemCount > 0) {
         reportAppleContractChange({
@@ -371,7 +399,8 @@ export class AsoPopularityService {
         try {
           const singleResponse = await requestWithAuthRecovery(
             [term],
-            `isolation:${term}`
+            `isolation:${term}`,
+            { maxAttempts: 1 }
           );
           if (
             singleResponse.statusCode === 200 &&
@@ -398,10 +427,12 @@ export class AsoPopularityService {
   }
 
   async fetchKeywordPopularities(
+    country: string,
     keywords: string[],
     options?: FetchKeywordPopularitiesOptions
   ): Promise<Record<string, number>> {
     const result = await this.fetchKeywordPopularitiesWithFailures(
+      country,
       keywords,
       options
     );

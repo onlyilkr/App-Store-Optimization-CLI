@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Button, Card, Input } from "./ui-react";
-import { DEFAULT_RESEARCH_APP_ID } from "../shared/aso-research";
+import {
+  DEFAULT_RESEARCH_APP_ID,
+  researchAppIdForProject,
+} from "../shared/aso-research";
 import {
   DEFAULT_ASO_COUNTRY,
   apiGet,
@@ -28,13 +31,19 @@ import { useFiltersSort, type SortDir, type SortKey } from "./hooks/use-filters-
 import { useSelection } from "./hooks/use-selection";
 import { sanitizeKeywords } from "../domain/keywords/policy";
 import { useAuthFlow } from "./hooks/use-auth-flow";
+import { usePrimaryAppSetupFlow } from "./hooks/use-primary-app-setup-flow";
 import { useAddAppSearch } from "./hooks/use-add-app-search";
 import { StatusBanners } from "./components/status-banners";
-import { AuthDialog } from "./components/auth-dialog";
+import { AsoPromptDialog } from "./components/aso-prompt-dialog";
 import { KeywordActionMenu } from "./components/keyword-action-menu";
 import { AddAppDialog } from "./components/add-app-dialog";
 import { AppActionMenu } from "./components/app-action-menu";
 import { CompareView } from "./components/CompareView";
+import { ProjectSelector } from "./components/ProjectSelector";
+import { ProjectCreateDialog } from "./components/ProjectCreateDialog";
+import { ProjectManageDialog } from "./components/ProjectManageDialog";
+import { ProjectsMigrationBanner } from "./components/ProjectsMigrationBanner";
+import { useCurrentProject } from "./hooks/use-current-project";
 import {
   DASHBOARD_FILTER_DEFAULTS,
   DASHBOARD_FILTER_OPTIONS,
@@ -108,6 +117,12 @@ type KeywordPositionHistoryPayload = {
   keyword: string;
   points: KeywordHistoryPoint[];
 };
+type PositionHistoryHoverPoint = {
+  x: number;
+  y: number;
+  capturedAt: string;
+  position: number;
+};
 
 type FilterMenuKey = "popularity" | "difficulty" | "brand" | "favorite" | "rank";
 type KeywordActionMenuState = {
@@ -178,11 +193,14 @@ const SIDEBAR_SELECTION_CONTROL_SELECTOR = ".app-id-copy-target, .app-id-copy-ic
 const KEYWORDS_PAGE_SIZE = 100;
 const POSITION_HISTORY_CHART_WIDTH = 760;
 const POSITION_HISTORY_CHART_HEIGHT = 250;
+const POSITION_HISTORY_RANK_MIN = 1;
+const POSITION_HISTORY_RANK_MAX = 200;
+const POSITION_HISTORY_RANK_TICKS = [25, 50, 75, 100, 125, 150, 175, 200];
 const POSITION_HISTORY_CHART_PADDING = {
-  top: 16,
-  right: 16,
-  bottom: 32,
-  left: 40,
+  top: 14,
+  right: 44,
+  bottom: 34,
+  left: 18,
 };
 
 type StartupRefreshStatus = "idle" | "running" | "completed" | "failed";
@@ -192,6 +210,7 @@ type StartupRefreshStatusPayload = {
   startedAt: string | null;
   finishedAt: string | null;
   lastError: string | null;
+  requiresReauthentication: boolean;
   counters: {
     eligibleKeywordCount: number;
     refreshedKeywordCount: number;
@@ -306,6 +325,15 @@ export function App() {
   const [keywordActionMenu, setKeywordActionMenu] = useState<KeywordActionMenuState | null>(null);
   const [appActionMenu, setAppActionMenu] = useState<AppActionMenuState | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [projectCreateOpen, setProjectCreateOpen] = useState(false);
+  const [projectManageOpen, setProjectManageOpen] = useState(false);
+  const projectContext = useCurrentProject();
+  const currentProjectId = projectContext.currentProject?.id ?? null;
+  const currentProjectCountry =
+    projectContext.currentProject?.country ?? DEFAULT_ASO_COUNTRY;
+  const currentResearchAppId = currentProjectId
+    ? researchAppIdForProject(currentProjectId)
+    : DEFAULT_RESEARCH_APP_ID;
   const [researchSectionCollapsed, setResearchSectionCollapsed] = useState(false);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -317,6 +345,8 @@ export function App() {
   const [hasCachedData, setHasCachedData] = useState(false);
   const [isAddingKeywords, setIsAddingKeywords] = useState(false);
   const [isRetryingFailedKeywords, setIsRetryingFailedKeywords] = useState(false);
+  const [isRestartingStartupRefresh, setIsRestartingStartupRefresh] =
+    useState(false);
   const [loadingText, setLoadingText] = useState("");
   const [errorText, setErrorText] = useState("");
   const [successText, setSuccessText] = useState("");
@@ -335,6 +365,8 @@ export function App() {
   >([]);
   const [positionHistoryLoading, setPositionHistoryLoading] = useState(false);
   const [positionHistoryError, setPositionHistoryError] = useState("");
+  const [positionHistoryHoverPoint, setPositionHistoryHoverPoint] =
+    useState<PositionHistoryHoverPoint | null>(null);
   const [startupRefreshState, setStartupRefreshState] =
     useState<StartupRefreshStatusPayload | null>(null);
   const [displayLocale] = useState(() => getBrowserLocale());
@@ -343,8 +375,9 @@ export function App() {
   const keywordLoadRequestIdRef = useRef(0);
   const keywordQueryKeyRef = useRef<string | null>(null);
   const selectedAppIdRef = useRef(selectedAppId);
-  const autoRetryInFlightRef = useRef(false);
   const startupAppSyncAtRef = useRef<string | null>(null);
+  const resumeStartupRefreshAfterAuthRef = useRef(false);
+  const startupRefreshAuthAttemptKeyRef = useRef<string | null>(null);
 
   const appById = useMemo(
     () => new Map(apps.map((app) => [app.id, app])),
@@ -353,7 +386,7 @@ export function App() {
   const selectedApp = appById.get(selectedAppId);
   const selectedAppName =
     selectedApp?.name ??
-    (selectedAppId === DEFAULT_RESEARCH_APP_ID ? "Research" : selectedAppId);
+    (selectedAppId === currentResearchAppId ? "Research" : selectedAppId);
   const isSelectedAppResearch = selectedApp?.kind === "research";
   const showRankingColumns = !isSelectedAppResearch;
   const {
@@ -395,17 +428,31 @@ export function App() {
     authStatus,
     authStatusError,
     isStartingAuth,
-    pendingAddContext,
+    isSubmittingAuthPrompt,
+    authPendingPrompt,
     setPendingAddContext,
     openAuthModalForPendingAdd,
+    requestStartupRefreshReauthentication,
     startReauthentication,
+    submitAuthPromptResponse,
     authCheckLoadingText,
     authStatusLabel,
+    activeAuthContext,
     canStartReauth,
     showReauthButton,
   } = useAuthFlow({
     isAddingKeywords,
   });
+  const {
+    setupStatusError,
+    setupPendingPrompt,
+    isStartingSetup,
+    isSubmittingSetupPrompt,
+    setupModalOpen,
+    startSetup,
+    submitSetupPromptResponse,
+    openSetupModalForPrimaryAppAccessError,
+  } = usePrimaryAppSetupFlow();
   const {
     isAddAppPopoverOpen,
     addAppSearchTerm,
@@ -434,18 +481,41 @@ export function App() {
       ? "No keywords yet for this app."
       : "No keywords match the current search/filters.";
   const hasAnyAddedNonDefaultApp = useMemo(
-    () => apps.some((app) => app.id !== DEFAULT_RESEARCH_APP_ID),
+    () => apps.some((app) => app.id !== currentResearchAppId),
     [apps]
   );
   const hasAnyAddedKeyword = useMemo(
     () => apps.some((app) => Boolean(app.lastKeywordAddedAt)),
     [apps]
   );
+  const isKeywordMutationBlockedByStartupReauth =
+    startupRefreshState?.requiresReauthentication === true;
 
+  const refreshProjects = projectContext.refresh;
   const loadApps = useCallback(async (): Promise<AppItem[]> => {
     const list = await apiGet<AppItem[]>(`/api/apps`);
     setApps(list);
+    // Keep project dropdown counts in sync after any app mutation that calls loadApps.
+    void refreshProjects().catch(() => {});
     return list;
+  }, [refreshProjects]);
+
+  const restartStartupRefresh = useCallback(async (): Promise<void> => {
+    try {
+      setIsRestartingStartupRefresh(true);
+      const data = await apiWrite<StartupRefreshStatusPayload>(
+        "POST",
+        "/api/aso/refresh/start",
+        {}
+      );
+      setStartupRefreshState(data);
+    } catch (error) {
+      setErrorText(
+        toActionableErrorMessage(error, "Failed to restart background refresh")
+      );
+    } finally {
+      setIsRestartingStartupRefresh(false);
+    }
   }, []);
 
   const buildKeywordQueryKey = useCallback((appId: string) => {
@@ -485,7 +555,7 @@ export function App() {
   const loadKeywords = useCallback(async (appId: string, requestedPage: number = 1) => {
     const requestId = ++keywordLoadRequestIdRef.current;
     const params = new URLSearchParams({
-      country: DEFAULT_ASO_COUNTRY,
+      country: currentProjectCountry,
       appId,
       page: String(Math.max(1, requestedPage)),
       pageSize: String(KEYWORDS_PAGE_SIZE),
@@ -555,6 +625,7 @@ export function App() {
     );
   }, [
     brandFilter,
+    currentProjectCountry,
     favoriteFilter,
     keywordFilter,
     maxDifficulty,
@@ -574,7 +645,7 @@ export function App() {
         setHasCachedData(true);
         let activeAppId = selectedAppIdRef.current;
         if (
-          activeAppId === DEFAULT_RESEARCH_APP_ID &&
+          activeAppId === currentResearchAppId &&
           !list.some((a) => a.id === activeAppId)
         ) {
           const firstResearch = list.find((a) => a.kind === "research");
@@ -583,9 +654,9 @@ export function App() {
             setSelectedAppId(firstResearch.id);
           }
         }
-        if (activeAppId !== DEFAULT_RESEARCH_APP_ID && !list.some((a) => a.id === activeAppId)) {
-          activeAppId = DEFAULT_RESEARCH_APP_ID;
-          setSelectedAppId(DEFAULT_RESEARCH_APP_ID);
+        if (activeAppId !== currentResearchAppId && !list.some((a) => a.id === activeAppId)) {
+          activeAppId = currentResearchAppId;
+          setSelectedAppId(currentResearchAppId);
         }
         await loadKeywords(activeAppId, 1);
         keywordQueryKeyRef.current = buildKeywordQueryKey(activeAppId);
@@ -656,6 +727,14 @@ export function App() {
     startupAppSyncAtRef.current = startupRefreshState.finishedAt;
     void loadApps().catch(() => {});
   }, [startupRefreshState, loadApps]);
+
+  useEffect(() => {
+    if (!currentProjectId) return;
+    void loadApps().catch(() => {});
+    if (selectedAppId) {
+      void loadKeywords(selectedAppId, 1).catch(() => {});
+    }
+  }, [currentProjectId]);
 
   useEffect(() => {
     if (isCompactLayout && sidebarCollapsed) {
@@ -757,12 +836,25 @@ export function App() {
   }, [positionHistoryKeyword]);
 
   useEffect(() => {
+    if (positionHistoryKeyword) return;
+    setPositionHistoryHoverPoint(null);
+  }, [positionHistoryKeyword]);
+
+  useEffect(() => {
+    const shouldPoll =
+      !startupRefreshState ||
+      startupRefreshState.status === "idle" ||
+      startupRefreshState.status === "running";
+    if (!shouldPoll) return;
+
     let isActive = true;
     let intervalId: number | null = null;
 
     const pollStatus = async (): Promise<void> => {
       try {
-        const data = await apiGet<StartupRefreshStatusPayload>("/api/aso/refresh-status");
+        const data = await apiGet<StartupRefreshStatusPayload>(
+          "/api/aso/refresh-status"
+        );
         if (!isActive) return;
         setStartupRefreshState(data);
         if (
@@ -779,12 +871,9 @@ export function App() {
     };
 
     void pollStatus();
-    intervalId = window.setInterval(
-      () => {
-        void pollStatus();
-      },
-      STARTUP_REFRESH_STATUS_POLL_INTERVAL_SECONDS * 1000
-    );
+    intervalId = window.setInterval(() => {
+      void pollStatus();
+    }, STARTUP_REFRESH_STATUS_POLL_INTERVAL_SECONDS * 1000);
 
     return () => {
       isActive = false;
@@ -792,7 +881,7 @@ export function App() {
         window.clearInterval(intervalId);
       }
     };
-  }, []);
+  }, [startupRefreshState?.status]);
 
   const hasPendingDifficulty = pendingKeywordCount > 0;
 
@@ -851,7 +940,7 @@ export function App() {
       await apiWrite("DELETE", "/api/aso/keywords", {
         appId: selectedAppId,
         keywords: selected,
-        country: DEFAULT_ASO_COUNTRY,
+        country: currentProjectCountry,
       });
       setSelectedKeywords(new Set());
       setSelectionAnchor(null);
@@ -878,7 +967,7 @@ export function App() {
           appId: selectedAppId,
           keyword: rowKeyword,
           isFavorite: nextIsFavorite,
-          country: DEFAULT_ASO_COUNTRY,
+          country: currentProjectCountry,
         });
         setKeywords((prev) =>
           prev.map((row) =>
@@ -898,7 +987,7 @@ export function App() {
         });
       }
     },
-    [keywordPage, loadKeywords, selectedAppId]
+    [currentProjectCountry, keywordPage, loadKeywords, selectedAppId]
   );
 
   const onDeleteSidebarApp = useCallback(
@@ -918,10 +1007,10 @@ export function App() {
         let nextSelectedAppId = selectedAppIdRef.current;
         if (!list.some((app) => app.id === nextSelectedAppId) || nextSelectedAppId === appId) {
           const fallbackApp =
-            list.find((app) => app.id === DEFAULT_RESEARCH_APP_ID) ??
+            list.find((app) => app.id === currentResearchAppId) ??
             list.find((app) => app.kind === "research") ??
             list[0];
-          nextSelectedAppId = fallbackApp?.id ?? DEFAULT_RESEARCH_APP_ID;
+          nextSelectedAppId = fallbackApp?.id ?? currentResearchAppId;
           setSelectedAppId(nextSelectedAppId);
         }
         await loadKeywords(nextSelectedAppId, 1);
@@ -937,7 +1026,7 @@ export function App() {
 
   const onSidebarAppContextMenuOpen = useCallback(
     (event: React.MouseEvent<HTMLElement>, app: AppItem) => {
-      if (app.id === DEFAULT_RESEARCH_APP_ID) return;
+      if (app.id === currentResearchAppId) return;
       if (isSidebarSelectionControlTarget(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
@@ -1116,6 +1205,10 @@ export function App() {
 
   const submitKeywords = useCallback(
     async (kws: string[]): Promise<boolean> => {
+      if (isKeywordMutationBlockedByStartupReauth) {
+        setErrorText("Finish Apple reauthentication before adding or retrying keywords.");
+        return false;
+      }
       try {
         setIsAddingKeywords(true);
         setErrorText("");
@@ -1124,7 +1217,7 @@ export function App() {
         await apiWrite("POST", "/api/aso/keywords", {
           appId: selectedAppId,
           keywords: kws,
-          country: DEFAULT_ASO_COUNTRY,
+          country: currentProjectCountry,
         });
         setAddInput("");
         setSuccessText("");
@@ -1138,6 +1231,7 @@ export function App() {
         return true;
       } catch (error) {
         if (openAuthModalForPendingAdd(error, kws)) return false;
+        if (openSetupModalForPrimaryAppAccessError(error)) return false;
         setErrorText(toActionableErrorMessage(error, "Failed to add keywords"));
         return false;
       } finally {
@@ -1146,11 +1240,14 @@ export function App() {
       }
     },
     [
+      currentProjectCountry,
       selectedAppId,
       keywordPage,
       loadApps,
       loadKeywords,
       openAuthModalForPendingAdd,
+      openSetupModalForPrimaryAppAccessError,
+      isKeywordMutationBlockedByStartupReauth,
     ]
   );
 
@@ -1182,6 +1279,10 @@ export function App() {
 
   const onRetryFailedKeywords = useCallback(async () => {
     if (failedKeywordCount <= 0) return;
+    if (isKeywordMutationBlockedByStartupReauth) {
+      setErrorText("Finish Apple reauthentication before adding or retrying keywords.");
+      return;
+    }
     try {
       setIsRetryingFailedKeywords(true);
       setErrorText("");
@@ -1193,7 +1294,7 @@ export function App() {
         failedCount: number;
       }>("POST", "/api/aso/keywords/retry-failed", {
         appId: selectedAppId,
-        country: DEFAULT_ASO_COUNTRY,
+        country: currentProjectCountry,
       });
       await loadKeywords(selectedAppId, keywordPage);
       const retriedLabel = `Retried ${result.retriedCount} failed keyword${result.retriedCount === 1 ? "" : "s"}`;
@@ -1207,23 +1308,45 @@ export function App() {
         );
       }
     } catch (error) {
+      if (openSetupModalForPrimaryAppAccessError(error)) return;
       setErrorText(toActionableErrorMessage(error, "Failed to retry failed keywords"));
     } finally {
       setIsRetryingFailedKeywords(false);
       setLoadingText("");
     }
-  }, [failedKeywordCount, keywordPage, loadKeywords, selectedAppId]);
+  }, [
+    currentProjectCountry,
+    failedKeywordCount,
+    keywordPage,
+    loadKeywords,
+    openSetupModalForPrimaryAppAccessError,
+    selectedAppId,
+    isKeywordMutationBlockedByStartupReauth,
+  ]);
 
   useEffect(() => {
     if (authStatus !== "succeeded") return;
-    if (!pendingAddContext) return;
-    if (autoRetryInFlightRef.current) return;
+    if (!resumeStartupRefreshAfterAuthRef.current) return;
+    resumeStartupRefreshAfterAuthRef.current = false;
+    void restartStartupRefresh();
+  }, [authStatus, restartStartupRefresh]);
 
-    autoRetryInFlightRef.current = true;
-    void submitKeywords(pendingAddContext.keywords).finally(() => {
-      autoRetryInFlightRef.current = false;
-    });
-  }, [authStatus, pendingAddContext, submitKeywords]);
+  useEffect(() => {
+    if (!startupRefreshState) return;
+    if (startupRefreshState.status !== "failed") return;
+    if (!startupRefreshState.requiresReauthentication) return;
+
+    const attemptKey =
+      startupRefreshState.finishedAt ??
+      startupRefreshState.startedAt ??
+      startupRefreshState.lastError ??
+      "startup-refresh-auth-required";
+    if (startupRefreshAuthAttemptKeyRef.current === attemptKey) return;
+
+    startupRefreshAuthAttemptKeyRef.current = attemptKey;
+    resumeStartupRefreshAfterAuthRef.current = true;
+    requestStartupRefreshReauthentication();
+  }, [requestStartupRefreshReauthentication, startupRefreshState]);
 
   const onAddApp = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -1317,7 +1440,7 @@ export function App() {
     setTopAppsLoading(true);
     try {
       const data = await apiGet<KeywordDetails>(
-        `/api/aso/top-apps?country=${DEFAULT_ASO_COUNTRY}&keyword=${encodeURIComponent(rowKeyword)}&limit=${TOP_APPS_DIALOG_LIMIT}`
+        `/api/aso/top-apps?country=${currentProjectCountry}&keyword=${encodeURIComponent(rowKeyword)}&limit=${TOP_APPS_DIALOG_LIMIT}`
       );
       setTopAppsRows(buildTopAppRows(data));
     } catch (error) {
@@ -1331,10 +1454,11 @@ export function App() {
     setPositionHistoryKeyword(rowKeyword);
     setPositionHistoryPoints([]);
     setPositionHistoryError("");
+    setPositionHistoryHoverPoint(null);
     setPositionHistoryLoading(true);
     try {
       const data = await apiGet<KeywordPositionHistoryPayload>(
-        `/api/aso/keywords/history?country=${DEFAULT_ASO_COUNTRY}&appId=${encodeURIComponent(
+        `/api/aso/keywords/history?country=${currentProjectCountry}&appId=${encodeURIComponent(
           selectedAppId
         )}&keyword=${encodeURIComponent(rowKeyword)}`
       );
@@ -1430,7 +1554,7 @@ export function App() {
     const positions = sorted.map((point) => point.position);
     const bestPosition = Math.min(...positions);
     const worstPosition = Math.max(...positions);
-    const yRange = Math.max(1, worstPosition - bestPosition);
+    const yRange = POSITION_HISTORY_RANK_MAX - POSITION_HISTORY_RANK_MIN;
     const minTimestamp = Date.parse(sorted[0].capturedAt);
     const maxTimestamp = Date.parse(sorted[sorted.length - 1].capturedAt);
     const xRange = Math.max(1, maxTimestamp - minTimestamp);
@@ -1440,9 +1564,13 @@ export function App() {
       const x =
         POSITION_HISTORY_CHART_PADDING.left +
         ((timestamp - minTimestamp) / xRange) * innerWidth;
+      const clampedPosition = Math.max(
+        POSITION_HISTORY_RANK_MIN,
+        Math.min(POSITION_HISTORY_RANK_MAX, point.position)
+      );
       const y =
         POSITION_HISTORY_CHART_PADDING.top +
-        ((point.position - bestPosition) / yRange) * innerHeight;
+        ((clampedPosition - POSITION_HISTORY_RANK_MIN) / yRange) * innerHeight;
       return {
         x,
         y,
@@ -1455,19 +1583,88 @@ export function App() {
       .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
       .join(" ");
 
+    const yTicks = POSITION_HISTORY_RANK_TICKS.map((rank) => ({
+      rank,
+      y:
+        POSITION_HISTORY_CHART_PADDING.top +
+        ((rank - POSITION_HISTORY_RANK_MIN) / yRange) * innerHeight,
+    }));
+
+    const monthFormatter = new Intl.DateTimeFormat(displayLocale, { month: "short" });
+    const firstMonthStart = Date.UTC(
+      new Date(minTimestamp).getUTCFullYear(),
+      new Date(minTimestamp).getUTCMonth(),
+      1
+    );
+    const lastMonthStart = Date.UTC(
+      new Date(maxTimestamp).getUTCFullYear(),
+      new Date(maxTimestamp).getUTCMonth(),
+      1
+    );
+    const monthTicks: Array<{ label: string; x: number }> = [];
+    for (let cursor = firstMonthStart; cursor <= lastMonthStart; ) {
+      const x =
+        POSITION_HISTORY_CHART_PADDING.left +
+        ((cursor - minTimestamp) / xRange) * innerWidth;
+      monthTicks.push({
+        label: monthFormatter.format(new Date(cursor)),
+        x: Math.min(
+          chartWidth - POSITION_HISTORY_CHART_PADDING.right,
+          Math.max(POSITION_HISTORY_CHART_PADDING.left, x)
+        ),
+      });
+      const nextMonth = new Date(cursor);
+      nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
+      cursor = nextMonth.getTime();
+    }
+
     return {
       chartWidth,
       chartHeight,
       points,
       linePath,
-      firstDateLabel: formatCalendarDate(sorted[0].capturedAt, displayLocale) ?? "-",
-      lastDateLabel:
-        formatCalendarDate(sorted[sorted.length - 1].capturedAt, displayLocale) ??
-        "-",
+      yTicks,
+      monthTicks,
       bestPosition,
       worstPosition,
     };
   }, [displayLocale, positionHistoryPoints]);
+
+  const positionHistoryTooltip = useMemo(() => {
+    if (!positionHistoryChart || !positionHistoryHoverPoint) return null;
+    const dateLabel =
+      formatCalendarDate(positionHistoryHoverPoint.capturedAt, displayLocale) ??
+      positionHistoryHoverPoint.capturedAt;
+    const rankLabel = `Rank ${positionHistoryHoverPoint.position}`;
+    const width = Math.max(
+      110,
+      dateLabel.length * 7 + 16,
+      rankLabel.length * 7 + 16
+    );
+    const height = 40;
+    const safeTop = 4;
+    const safeLeft = 4;
+    const safeRight = positionHistoryChart.chartWidth - width - 4;
+    const safeBottom = positionHistoryChart.chartHeight - height - 4;
+    let x = positionHistoryHoverPoint.x + 12;
+    if (x > safeRight) {
+      x = positionHistoryHoverPoint.x - width - 12;
+    }
+    x = Math.max(safeLeft, Math.min(safeRight, x));
+    let y = positionHistoryHoverPoint.y - height - 10;
+    if (y < safeTop) {
+      y = positionHistoryHoverPoint.y + 10;
+    }
+    y = Math.max(safeTop, Math.min(safeBottom, y));
+    return {
+      x,
+      y,
+      width,
+      height,
+      dateLabel,
+      rankLabel,
+    };
+  }, [displayLocale, positionHistoryChart, positionHistoryHoverPoint]);
 
   const getFilterLabel = (key: FilterMenuKey): string | null => {
     switch (key) {
@@ -1662,18 +1859,75 @@ export function App() {
   const showError = !showLoading && errorText !== "";
   const showSuccess = !showLoading && !showError && successText !== "";
   const addButtonLabel = isCompactLayout ? "Add" : "Add Keywords";
-  const startupRefreshMessage = useMemo(() => {
-    if (!startupRefreshState) return null;
-    if (startupRefreshState.status === "running") {
-      const { eligibleKeywordCount, refreshedKeywordCount } =
-        startupRefreshState.counters;
-      if (eligibleKeywordCount > 0) {
-        return `Refreshing local data in background (${refreshedKeywordCount}/${eligibleKeywordCount} keywords)...`;
-      }
-      return "Refreshing local data in background...";
+  const isStartupRefreshAuthRecoveryAttemptActive =
+    isKeywordMutationBlockedByStartupReauth &&
+    activeAuthContext === "startup-refresh" &&
+    (isStartingAuth ||
+      authStatus === "idle" ||
+      authStatus === "in_progress");
+  const isStartupRefreshResumeInProgress =
+    isKeywordMutationBlockedByStartupReauth &&
+    (isRestartingStartupRefresh || authStatus === "succeeded");
+  const isStartupRefreshAutoRecoveryActive =
+    isStartupRefreshAuthRecoveryAttemptActive ||
+    isStartupRefreshResumeInProgress;
+  const keywordMutationStatusText = isStartupRefreshAuthRecoveryAttemptActive
+    ? "Reauthenticating with Apple..."
+    : isStartupRefreshResumeInProgress
+      ? "Resuming background refresh..."
+    : authCheckLoadingText !== ""
+      ? "Checking Apple session..."
+      : isKeywordMutationBlockedByStartupReauth
+        ? "Apple reauthentication required."
+        : "";
+  const startupRefreshBanner = useMemo(() => {
+    if (keywordMutationStatusText) {
+      return {
+        tone:
+          isKeywordMutationBlockedByStartupReauth &&
+          !isStartupRefreshAutoRecoveryActive
+            ? ("error" as const)
+            : ("muted" as const),
+        action: null,
+        text: keywordMutationStatusText,
+      };
     }
-    return null;
-  }, [startupRefreshState]);
+    if (!startupRefreshState) return null;
+    const { eligibleKeywordCount, refreshedKeywordCount } =
+      startupRefreshState.counters;
+    const progressLabel =
+      eligibleKeywordCount > 0
+        ? `${refreshedKeywordCount}/${eligibleKeywordCount} keywords`
+        : null;
+    if (startupRefreshState.status === "running") {
+      return {
+        tone: "muted" as const,
+        action: null,
+        text: progressLabel
+          ? `Refreshing local data in background (${progressLabel})...`
+          : "Refreshing local data in background...",
+      };
+    }
+    if (startupRefreshState.status !== "failed") return null;
+    const progressSuffix = progressLabel ? ` after ${progressLabel}` : "";
+    if (startupRefreshState.requiresReauthentication) {
+      return {
+        tone: "error" as const,
+        action: null,
+        text: "Apple reauthentication required.",
+      };
+    }
+    return {
+      tone: "error" as const,
+      action: "retry" as const,
+      text: `Background refresh failed${progressSuffix}.`,
+    };
+  }, [
+    isKeywordMutationBlockedByStartupReauth,
+    isStartupRefreshAutoRecoveryActive,
+    keywordMutationStatusText,
+    startupRefreshState,
+  ]);
   const hasRankFiltersApplied =
     showRankingColumns &&
     (minRank !== DEFAULT_MIN_RANK || maxRank !== DEFAULT_MAX_RANK);
@@ -1689,12 +1943,23 @@ export function App() {
   const keywordPageLabel = Math.min(keywordPage, keywordTotalPages);
   return (
     <div id="app-shell" className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
-      <aside className="sidebar ui-card" aria-label="Apps">
+      <aside
+        className={`sidebar ui-card project-accent-${projectContext.currentProject?.color ?? "slate"}`}
+        aria-label="Apps"
+      >
         <div className="sidebar-header">
           <div className="sidebar-header-top">
             <div className="sidebar-brand">
               <img src="/aso-sidebar-icon.png" alt="" className="sidebar-brand-icon" aria-hidden="true" />
-              <h1>ASO Dashboard</h1>
+              <ProjectSelector
+                projects={projectContext.projects}
+                currentProject={projectContext.currentProject}
+                onSelect={(projectId) => {
+                  void projectContext.setCurrentProjectId(projectId);
+                }}
+                onCreate={() => setProjectCreateOpen(true)}
+                onManage={() => setProjectManageOpen(true)}
+              />
             </div>
             <Button
               id="toggle-sidebar"
@@ -1751,12 +2016,12 @@ export function App() {
               <>
                 {researchApps.length === 0 ? (
                   <button
-                    className={`app-item ${selectedAppId === DEFAULT_RESEARCH_APP_ID ? "active" : ""}`}
-                    data-app-id={DEFAULT_RESEARCH_APP_ID}
+                    className={`app-item ${selectedAppId === currentResearchAppId ? "active" : ""}`}
+                    data-app-id={currentResearchAppId}
                     role="tab"
-                    aria-selected={selectedAppId === DEFAULT_RESEARCH_APP_ID}
+                    aria-selected={selectedAppId === currentResearchAppId}
                     onClickCapture={(event) =>
-                      onSidebarAppClickCapture(event, DEFAULT_RESEARCH_APP_ID)
+                      onSidebarAppClickCapture(event, currentResearchAppId)
                     }
                   >
                     <span className="research-icon" aria-hidden="true">
@@ -1975,6 +2240,7 @@ export function App() {
       </aside>
 
       <main className="main">
+        <ProjectsMigrationBanner />
         <Card className="add-card">
           <form id="add-form" className="add-form" onSubmit={onAddKeywords}>
             <div className="onboarding-target-slot add-keywords-slot">
@@ -1988,7 +2254,15 @@ export function App() {
                 onChange={(e) => setAddInput(e.target.value)}
               />
             </div>
-            <Button id="add-submit" type="submit" disabled={isAddKeywordsBusy || isColdStart}>
+            <Button
+              id="add-submit"
+              type="submit"
+              disabled={
+                isAddKeywordsBusy ||
+                isColdStart ||
+                isKeywordMutationBlockedByStartupReauth
+              }
+            >
               <span className={`add-submit-label ${isAddKeywordsBusy ? "is-loading" : ""}`}>{addButtonLabel}</span>
               <span className={`button-loading-spinner ${isAddKeywordsBusy ? "visible" : ""}`} aria-hidden="true" />
             </Button>
@@ -1998,7 +2272,11 @@ export function App() {
                 className="retry-failed-button"
                 type="button"
                 variant="ghost"
-                disabled={isRetryingFailedKeywords || isColdStart}
+                disabled={
+                  isRetryingFailedKeywords ||
+                  isColdStart ||
+                  isKeywordMutationBlockedByStartupReauth
+                }
                 onClick={() => {
                   void onRetryFailedKeywords();
                 }}
@@ -2020,11 +2298,33 @@ export function App() {
         </Card>
 
         <Card className="top-toolbar">
-          <p
-            className={`startup-refresh-status ${startupRefreshMessage ? "visible" : ""}`}
+          <div
+            className={`startup-refresh-status ${startupRefreshBanner ? "visible" : ""} ${
+              startupRefreshBanner?.tone === "error" ? "error" : ""
+            }`}
           >
-            {startupRefreshMessage}
-          </p>
+            <p
+              className="startup-refresh-status-copy"
+              title={startupRefreshBanner?.text ?? undefined}
+            >
+              {startupRefreshBanner?.text}
+            </p>
+            {startupRefreshBanner?.action === "retry" ? (
+              <Button
+                id="startup-refresh-retry"
+                className="startup-refresh-action"
+                variant="outline"
+                size="sm"
+                type="button"
+                disabled={isRestartingStartupRefresh}
+                onClick={() => {
+                  void restartStartupRefresh();
+                }}
+              >
+                {isRestartingStartupRefresh ? "Retrying..." : "Retry Refresh"}
+              </Button>
+            ) : null}
+          </div>
           <Button
             id="reset-filters"
             className={hasFilters ? "" : "hidden"}
@@ -2100,7 +2400,7 @@ export function App() {
               .filter((app) => app.kind === "owned")
               .map((app) => ({ id: app.id, name: app.name, icon: app.icon }))}
             currentAppId={selectedAppId}
-            country={DEFAULT_ASO_COUNTRY}
+            country={currentProjectCountry}
             initialKeywords={filteredRows.map((row) => row.keyword)}
             onExit={() => setCompareOpen(false)}
           />
@@ -2419,7 +2719,7 @@ export function App() {
                   {topAppsRows.map((app) => {
                     const iconUrl = getIconUrl(app);
                     const subtitle = app.subtitle?.trim();
-                    const appStoreUrl = buildAppStoreUrl(app.appId, DEFAULT_ASO_COUNTRY);
+                    const appStoreUrl = buildAppStoreUrl(app.appId, currentProjectCountry);
                     const releaseDate = formatCalendarDate(app.releaseDate, displayLocale) || "-";
                     const lastUpdateDate =
                       formatCalendarDate(app.currentVersionReleaseDate, displayLocale) || "-";
@@ -2506,7 +2806,10 @@ export function App() {
       {positionHistoryKeyword ? (
         <div
           className="dialog-backdrop"
-          onClick={() => setPositionHistoryKeyword(null)}
+          onClick={() => {
+            setPositionHistoryHoverPoint(null);
+            setPositionHistoryKeyword(null);
+          }}
           role="presentation"
         >
           <section
@@ -2522,7 +2825,10 @@ export function App() {
                 type="button"
                 className="dialog-close"
                 aria-label="Close"
-                onClick={() => setPositionHistoryKeyword(null)}
+                onClick={() => {
+                  setPositionHistoryHoverPoint(null);
+                  setPositionHistoryKeyword(null);
+                }}
               >
                 ×
               </button>
@@ -2550,9 +2856,6 @@ export function App() {
                     <span>
                       Worst rank: <strong>{positionHistoryChart.worstPosition}</strong>
                     </span>
-                    <span>
-                      Points: <strong>{positionHistoryChart.points.length}</strong>
-                    </span>
                   </div>
                   <svg
                     className="position-history-chart"
@@ -2560,16 +2863,51 @@ export function App() {
                     role="img"
                     aria-label={`Position trend for ${positionHistoryKeyword}`}
                   >
-                    <line
-                      x1={POSITION_HISTORY_CHART_PADDING.left}
-                      y1={POSITION_HISTORY_CHART_PADDING.top}
-                      x2={POSITION_HISTORY_CHART_PADDING.left}
-                      y2={
-                        positionHistoryChart.chartHeight -
-                        POSITION_HISTORY_CHART_PADDING.bottom
-                      }
-                      className="position-history-axis"
-                    />
+                    {positionHistoryChart.yTicks.map((tick) => (
+                      <g key={`y-${tick.rank}`}>
+                        <line
+                          x1={POSITION_HISTORY_CHART_PADDING.left}
+                          y1={tick.y}
+                          x2={
+                            positionHistoryChart.chartWidth -
+                            POSITION_HISTORY_CHART_PADDING.right
+                          }
+                          y2={tick.y}
+                          className="position-history-guide-line"
+                        />
+                        <text
+                          x={positionHistoryChart.chartWidth - POSITION_HISTORY_CHART_PADDING.right + 6}
+                          y={tick.y}
+                          className="position-history-tick-label"
+                          textAnchor="start"
+                          dominantBaseline="middle"
+                        >
+                          {tick.rank}
+                        </text>
+                      </g>
+                    ))}
+                    {positionHistoryChart.monthTicks.map((tick, index) => (
+                      <g key={`x-${tick.label}-${index}`}>
+                        <line
+                          x1={tick.x}
+                          y1={POSITION_HISTORY_CHART_PADDING.top}
+                          x2={tick.x}
+                          y2={
+                            positionHistoryChart.chartHeight -
+                            POSITION_HISTORY_CHART_PADDING.bottom
+                          }
+                          className="position-history-guide-line position-history-guide-line-vertical"
+                        />
+                        <text
+                          x={tick.x}
+                          y={positionHistoryChart.chartHeight - POSITION_HISTORY_CHART_PADDING.bottom + 18}
+                          className="position-history-tick-label"
+                          textAnchor="middle"
+                        >
+                          {tick.label}
+                        </text>
+                      </g>
+                    ))}
                     <line
                       x1={POSITION_HISTORY_CHART_PADDING.left}
                       y1={
@@ -2595,25 +2933,72 @@ export function App() {
                         key={`${point.capturedAt}-${point.position}`}
                         cx={point.x}
                         cy={point.y}
-                        r={3.5}
+                        r={4}
                         className="position-history-point"
+                        tabIndex={0}
+                        onMouseEnter={() => setPositionHistoryHoverPoint(point)}
+                        onMouseLeave={() => setPositionHistoryHoverPoint(null)}
+                        onFocus={() => setPositionHistoryHoverPoint(point)}
+                        onBlur={() => setPositionHistoryHoverPoint(null)}
                       >
                         <title>
-                          {`${formatCalendarDate(point.capturedAt, displayLocale) ?? point.capturedAt}: #${point.position}`}
+                          {`${formatCalendarDate(point.capturedAt, displayLocale) ?? point.capturedAt} • Rank ${point.position}`}
                         </title>
                       </circle>
                     ))}
+                    {positionHistoryTooltip ? (
+                      <g className="position-history-tooltip" pointerEvents="none">
+                        <rect
+                          x={positionHistoryTooltip.x}
+                          y={positionHistoryTooltip.y}
+                          width={positionHistoryTooltip.width}
+                          height={positionHistoryTooltip.height}
+                          rx={8}
+                          ry={8}
+                          className="position-history-tooltip-bg"
+                        />
+                        <text
+                          x={positionHistoryTooltip.x + 8}
+                          y={positionHistoryTooltip.y + 16}
+                          className="position-history-tooltip-line"
+                        >
+                          {positionHistoryTooltip.dateLabel}
+                        </text>
+                        <text
+                          x={positionHistoryTooltip.x + 8}
+                          y={positionHistoryTooltip.y + 32}
+                          className="position-history-tooltip-line position-history-tooltip-line-rank"
+                        >
+                          {positionHistoryTooltip.rankLabel}
+                        </text>
+                      </g>
+                    ) : null}
                   </svg>
-                  <div className="position-history-axis-labels">
-                    <span>{positionHistoryChart.firstDateLabel}</span>
-                    <span>{positionHistoryChart.lastDateLabel}</span>
-                  </div>
                 </div>
               ) : null}
             </div>
           </section>
         </div>
       ) : null}
+      <ProjectCreateDialog
+        open={projectCreateOpen}
+        onClose={() => setProjectCreateOpen(false)}
+        onSubmit={async ({ name, color, country }) => {
+          await projectContext.createProject({ name, color, country });
+        }}
+      />
+      <ProjectManageDialog
+        open={projectManageOpen}
+        projects={projectContext.projects}
+        currentProjectId={currentProjectId}
+        onClose={() => setProjectManageOpen(false)}
+        onUpdate={async (projectId, patch) => {
+          await projectContext.updateProject(projectId, patch);
+        }}
+        onDelete={async (projectId) => {
+          await projectContext.deleteProject(projectId);
+        }}
+      />
       <AddAppDialog
         open={isAddAppPopoverOpen}
         onClose={closeAddAppPopover}
@@ -2633,16 +3018,51 @@ export function App() {
         isColdStart={isColdStart}
         isOwnedAppId={(appId) => existingOwnedAppIds.has(appId)}
       />
-      <AuthDialog
-        open={authModalOpen}
-        statusLabel={authStatusLabel}
-        statusError={authStatusError}
-        showReauthButton={showReauthButton}
-        canStartReauth={canStartReauth}
-        isStartingAuth={isStartingAuth}
-        onStartReauthentication={() => {
-          void startReauthentication();
+      <AsoPromptDialog
+        open={setupModalOpen}
+        fallbackTitle="Primary App ID Required"
+        fallbackMessage="Enter a Primary App ID so the dashboard can refresh Apple Search Ads keyword data."
+        statusError={setupStatusError}
+        prompt={setupPendingPrompt}
+        isSubmittingPrompt={isSubmittingSetupPrompt}
+        onSubmitPrompt={(response) => {
+          void submitSetupPromptResponse(response);
         }}
+        actionButton={
+          !setupPendingPrompt
+            ? {
+                label: "Retry Setup",
+                busyLabel: "Starting...",
+                disabled: isStartingSetup,
+                onClick: () => {
+                  void startSetup();
+                },
+              }
+            : null
+        }
+      />
+      <AsoPromptDialog
+        open={!setupModalOpen && authModalOpen}
+        fallbackTitle="Apple Reauthentication Required"
+        fallbackMessage={authStatusLabel}
+        statusError={authStatusError}
+        prompt={authPendingPrompt}
+        isSubmittingPrompt={isSubmittingAuthPrompt}
+        onSubmitPrompt={(response) => {
+          void submitAuthPromptResponse(response);
+        }}
+        actionButton={
+          showReauthButton
+            ? {
+                label: "Reauthenticate",
+                busyLabel: "Starting...",
+                disabled: !canStartReauth || isStartingAuth,
+                onClick: () => {
+                  void startReauthentication();
+                },
+              }
+            : null
+        }
       />
     </div>
   );

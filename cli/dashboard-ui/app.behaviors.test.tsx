@@ -255,13 +255,48 @@ function buildFetchMock(params: {
     const method = (init?.method ?? "GET").toUpperCase();
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
 
-    if (method === "GET" && url === "/api/apps") {
+    if (
+      method === "GET" &&
+      (url === "/api/apps" || url.startsWith("/api/apps?"))
+    ) {
       appsCallCount += 1;
       return jsonResponse(200, {
         success: true,
         data: withAppKinds(
           appsCallCount > 1 && params.afterAddApps ? params.afterAddApps : params.apps
         ),
+      });
+    }
+
+    if (method === "GET" && url === "/api/projects") {
+      return jsonResponse(200, {
+        success: true,
+        data: [
+          {
+            id: "default",
+            name: "Default",
+            color: "slate",
+            country: "US",
+            createdAt: "2024-01-01T00:00:00.000Z",
+            updatedAt: "2024-01-01T00:00:00.000Z",
+            appCount: 0,
+            keywordCount: 0,
+          },
+        ],
+      });
+    }
+
+    if (method === "GET" && url === "/api/projects/current") {
+      return jsonResponse(200, {
+        success: true,
+        data: { projectId: "default" },
+      });
+    }
+
+    if (method === "PUT" && url === "/api/projects/current") {
+      return jsonResponse(200, {
+        success: true,
+        data: { projectId: "default" },
       });
     }
 

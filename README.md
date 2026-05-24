@@ -5,11 +5,12 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/aso-cli"><img src="https://img.shields.io/npm/v/aso-cli" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@onlyilkr/aso-cli"><img src="https://img.shields.io/npm/v/@onlyilkr/aso-cli" alt="npm version" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License: MIT" /></a>
-  <a href="https://www.npmjs.com/package/aso-cli"><img src="https://img.shields.io/node/v/aso-cli" alt="Node.js" /></a>
-  <a href="https://github.com/semihcihan/App-Store-Optimization-CLI/actions/workflows/ci.yml"><img src="https://github.com/semihcihan/App-Store-Optimization-CLI/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
+  <a href="https://www.npmjs.com/package/@onlyilkr/aso-cli"><img src="https://img.shields.io/node/v/@onlyilkr/aso-cli" alt="Node.js" /></a>
 </p>
+
+> 📌 **Actively maintained fork** of [semihcihan/App-Store-Optimization-CLI](https://github.com/semihcihan/App-Store-Optimization-CLI). The upstream repository became inactive; this fork carries the project forward with **multi-storefront support (US/TR/DE/GB/FR/IT)**, ongoing bugfixes, and feature work. Full credit to [Semih Cihan](https://github.com/semihcihan) for the original foundation — see [LICENSE](./LICENSE).
 
 Research ASO keywords, inspect competition, and manage results from one local-first CLI.
 
@@ -19,6 +20,8 @@ Research ASO keywords, inspect competition, and manage results from one local-fi
 - Keyword scoring with popularity + difficulty + brand classification in one command
 - Local ASO dashboard for reviewing keyword/app data
 - Compare apps across keywords from the dashboard — pick multiple apps plus a keyword set and see a side-by-side rank matrix (including apps that don't currently track the keyword)
+- **Projects (workspaces)** to isolate apps and research keyword pools by category (e.g. gold tracker vs halal food scanner) — switch projects from the sidebar header with zero keyword bleed between contexts
+- **Multi-storefront support** for 6 App Store regions: 🇺🇸 US, 🇹🇷 TR, 🇩🇪 DE, 🇬🇧 GB, 🇫🇷 FR, 🇮🇹 IT — each project is scoped to one storefront, so rank/difficulty data reflects the chosen country's App Store
 - MCP tool (`aso_evaluate_keywords`) for agent workflows and automated keyword research
 
 <h3 align="center">ASO Dashboard</h3>
@@ -38,10 +41,23 @@ The dashboard keywords shown above were discovered and added automatically by an
 ## Install
 
 ```bash
-npm install -g aso-cli
+npm install -g @onlyilkr/aso-cli
 ```
 
-Note: requires Node.js `>=20.18.1`.
+The CLI command is still `aso` (binary name is unchanged for muscle-memory compatibility with the upstream package).
+
+Note: requires Node.js `>=18.14.1`.
+
+### Migrating from `aso-cli` (upstream)
+
+If you previously installed `aso-cli`, uninstall it first to avoid `aso` binary conflicts:
+
+```bash
+npm uninstall -g aso-cli
+npm install -g @onlyilkr/aso-cli
+```
+
+Your local database (`~/.aso/aso-db.sqlite`) and any saved credentials are preserved — this fork is backward-compatible with upstream data.
 
 ## Apple Search Ads Setup
 
@@ -184,9 +200,11 @@ Example MCP config:
 
 ## Current Scope
 
-- Storefront support: `US`
-- Multi-storefront support is planned
+- **Supported App Store storefronts:** `US`, `TR`, `DE`, `GB`, `FR`, `IT` — set per project from the dashboard (or via the `--country` flag in CLI)
+- Apple Search Ads popularity data is available wherever your Search Ads org has storefront access; missing-access cases degrade to `popularity = 0` so rank + difficulty still populate
+- Need another storefront? Open an issue — adding a new country is a small config change ([cli/shared/aso-storefronts.ts](cli/shared/aso-storefronts.ts))
 
 ## Project Docs
 
 - Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Website architecture: [docs/website-architecture.md](docs/website-architecture.md)

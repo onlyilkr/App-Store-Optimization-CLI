@@ -1,12 +1,14 @@
 import { DEFAULT_ASO_COUNTRY, normalizeCountry } from "../domain/keywords/policy";
 import type { OwnedAppKind, StoredOwnedApp } from "./types";
 import { getDb } from "./store";
+import { DEFAULT_PROJECT_ID } from "../shared/project-types";
 
 type OwnedAppRow = {
   id: string;
   kind: string;
   name: string;
   icon_json: string | null;
+  project_id: string;
   average_user_rating: number | null;
   user_rating_count: number | null;
   previous_average_user_rating: number | null;
@@ -46,6 +48,7 @@ function toStoredOwnedApp(row: OwnedAppRow): StoredOwnedApp {
     id: row.id,
     kind: toOwnedAppKind(row.kind),
     name: row.name,
+    projectId: row.project_id ?? DEFAULT_PROJECT_ID,
     averageUserRating: row.average_user_rating,
     userRatingCount: row.user_rating_count,
     previousAverageUserRating: row.previous_average_user_rating,
@@ -56,27 +59,53 @@ function toStoredOwnedApp(row: OwnedAppRow): StoredOwnedApp {
   };
 }
 
-export function listOwnedApps(country: string = DEFAULT_ASO_COUNTRY): StoredOwnedApp[] {
+export function listOwnedApps(
+  country: string = DEFAULT_ASO_COUNTRY,
+  projectId?: string
+): StoredOwnedApp[] {
   const db = getDb();
   const normalizedCountry = normalizeCountry(country);
+  const params: unknown[] = [normalizedCountry];
+  let joinClause = "";
+  let whereClause = "";
+  if (projectId) {
+    joinClause =
+      " INNER JOIN owned_app_project_memberships m ON m.app_id = app.id";
+    whereClause = " WHERE m.project_id = ?";
+    params.push(projectId);
+  }
   const rows = db
     .prepare(
-      `SELECT app.id, app.kind, app.name, app.icon_json,
+      `SELECT app.id, app.kind, app.name, app.icon_json, app.project_id,
               ratings.average_user_rating, ratings.user_rating_count,
               ratings.previous_average_user_rating, ratings.previous_user_rating_count,
               ratings.expires_at, ratings.last_fetched_at
        FROM owned_apps app
        LEFT JOIN owned_app_country_ratings ratings
          ON ratings.app_id = app.id
-        AND ratings.country = ?
+        AND ratings.country = ?${joinClause}${whereClause}
        ORDER BY app.name COLLATE NOCASE ASC`
     )
-    .all(normalizedCountry) as OwnedAppRow[];
+    .all(...params) as OwnedAppRow[];
   return rows.map(toStoredOwnedApp);
 }
 
-export function listOwnedAppIdsByKind(kind: OwnedAppKind): string[] {
+export function listOwnedAppIdsByKind(
+  kind: OwnedAppKind,
+  projectId?: string
+): string[] {
   const db = getDb();
+  if (projectId) {
+    const rows = db
+      .prepare(
+        `SELECT app.id
+         FROM owned_apps app
+         INNER JOIN owned_app_project_memberships m ON m.app_id = app.id
+         WHERE app.kind = ? AND m.project_id = ?`
+      )
+      .all(kind, projectId) as Array<{ id: string }>;
+    return rows.map((row) => row.id);
+  }
   const rows = db
     .prepare(
       `SELECT id
@@ -89,13 +118,22 @@ export function listOwnedAppIdsByKind(kind: OwnedAppKind): string[] {
 
 export function getOwnedAppById(
   id: string,
-  country: string = DEFAULT_ASO_COUNTRY
+  country: string = DEFAULT_ASO_COUNTRY,
+  projectId?: string
 ): StoredOwnedApp | null {
   const db = getDb();
   const normalizedCountry = normalizeCountry(country);
+  if (projectId) {
+    const membership = db
+      .prepare(
+        `SELECT 1 FROM owned_app_project_memberships WHERE app_id = ? AND project_id = ? LIMIT 1`
+      )
+      .get(id, projectId) as { 1?: number } | undefined;
+    if (!membership) return null;
+  }
   const row = db
     .prepare(
-      `SELECT app.id, app.kind, app.name, app.icon_json,
+      `SELECT app.id, app.kind, app.name, app.icon_json, app.project_id,
               ratings.average_user_rating, ratings.user_rating_count,
               ratings.previous_average_user_rating, ratings.previous_user_rating_count,
               ratings.expires_at, ratings.last_fetched_at
@@ -109,14 +147,69 @@ export function getOwnedAppById(
   return row ? toStoredOwnedApp(row) : null;
 }
 
+export function getAppProjectId(id: string): string | null {
+  const db = getDb();
+  const row = db
+    .prepare(`SELECT project_id FROM owned_apps WHERE id = ?`)
+    .get(id) as { project_id: string } | undefined;
+  return row?.project_id ?? null;
+}
+
+export function listAppProjectIds(id: string): string[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT project_id FROM owned_app_project_memberships WHERE app_id = ? ORDER BY added_at ASC`
+    )
+    .all(id) as Array<{ project_id: string }>;
+  return rows.map((row) => row.project_id);
+}
+
+export function addAppToProject(appId: string, projectId: string): boolean {
+  const db = getDb();
+  const result = db
+    .prepare(
+      `INSERT OR IGNORE INTO owned_app_project_memberships (app_id, project_id, added_at)
+       VALUES (?, ?, ?)`
+    )
+    .run(appId, projectId, new Date().toISOString());
+  return result.changes > 0;
+}
+
+export function removeAppFromProject(
+  appId: string,
+  projectId: string
+): { removed: boolean; remainingProjects: number } {
+  const db = getDb();
+  const result = db
+    .prepare(
+      `DELETE FROM owned_app_project_memberships WHERE app_id = ? AND project_id = ?`
+    )
+    .run(appId, projectId);
+  const remaining = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM owned_app_project_memberships WHERE app_id = ?`
+    )
+    .get(appId) as { n: number };
+  return {
+    removed: result.changes > 0,
+    remainingProjects: Number(remaining?.n ?? 0),
+  };
+}
+
 export function upsertOwnedApps(
-  apps: Array<{ id: string; kind: OwnedAppKind; name: string }>
+  apps: Array<{
+    id: string;
+    kind: OwnedAppKind;
+    name: string;
+    projectId?: string;
+  }>
 ): void {
   if (apps.length === 0) return;
   const db = getDb();
   const stmt = db.prepare(
-    `INSERT INTO owned_apps (id, kind, name)
-     VALUES (@id, @kind, @name)
+    `INSERT INTO owned_apps (id, kind, name, project_id)
+     VALUES (@id, @kind, @name, @projectId)
      ON CONFLICT(id) DO UPDATE SET
        kind = excluded.kind,
        name = excluded.name`
@@ -128,6 +221,7 @@ export function upsertOwnedApps(
         id: app.id,
         kind: app.kind,
         name: app.name,
+        projectId: app.projectId ?? DEFAULT_PROJECT_ID,
       });
     }
   });
@@ -139,6 +233,7 @@ export function upsertOwnedAppSnapshots(
   apps: Array<{
     id: string;
     name?: string;
+    projectId?: string;
     averageUserRating?: number | null;
     userRatingCount?: number | null;
     icon?: Record<string, unknown>;
@@ -150,7 +245,7 @@ export function upsertOwnedAppSnapshots(
   const db = getDb();
   const normalizedCountry = normalizeCountry(country);
   const selectOwnedStmt = db.prepare(
-    `SELECT id, kind, name, icon_json
+    `SELECT id, kind, name, icon_json, project_id
      FROM owned_apps
      WHERE id = ?`
   );
@@ -162,8 +257,8 @@ export function upsertOwnedAppSnapshots(
      WHERE app_id = ? AND country = ?`
   );
   const upsertOwnedStmt = db.prepare(
-    `INSERT INTO owned_apps (id, kind, name, icon_json)
-     VALUES (@id, @kind, @name, @iconJson)
+    `INSERT INTO owned_apps (id, kind, name, icon_json, project_id)
+     VALUES (@id, @kind, @name, @iconJson, @projectId)
      ON CONFLICT(id) DO UPDATE SET
        kind = excluded.kind,
        name = excluded.name,
@@ -194,7 +289,13 @@ export function upsertOwnedAppSnapshots(
   const tx = db.transaction(() => {
     for (const app of apps) {
       const existingOwned = selectOwnedStmt.get(app.id) as
-        | { id: string; kind: string; name: string; icon_json: string | null }
+        | {
+            id: string;
+            kind: string;
+            name: string;
+            icon_json: string | null;
+            project_id: string | null;
+          }
         | undefined;
       const existingRating = selectRatingStmt.get(
         app.id,
@@ -227,11 +328,17 @@ export function upsertOwnedAppSnapshots(
       const icon =
         app.icon ?? parseJsonObject(existingOwned?.icon_json ?? null) ?? undefined;
 
+      const projectId =
+        app.projectId ??
+        existingOwned?.project_id ??
+        DEFAULT_PROJECT_ID;
+
       upsertOwnedStmt.run({
         id: app.id,
         kind,
         name: nextName,
         iconJson: icon ? JSON.stringify(icon) : null,
+        projectId,
       });
 
       upsertRatingsStmt.run({

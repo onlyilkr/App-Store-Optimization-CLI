@@ -19,7 +19,7 @@ describe("aso-apple-popularity-client", () => {
     jest.clearAllMocks();
     jest.useFakeTimers();
     jest.spyOn(Math, "random").mockReturnValue(0);
-    process.env.ASO_RETRY_MAX_ATTEMPTS = "4";
+    process.env.ASO_RETRY_MAX_ATTEMPTS = "2";
     process.env.ASO_RETRY_BASE_DELAY_MS = "1000";
     process.env.ASO_RETRY_MAX_DELAY_MS = "30000";
     process.env.ASO_RETRY_JITTER_FACTOR = "0.1";
@@ -34,7 +34,7 @@ describe("aso-apple-popularity-client", () => {
     delete process.env.ASO_RETRY_JITTER_FACTOR;
   });
 
-  it("retries KWS_NO_ORG_CONTENT_PROVIDERS up to 3 times and succeeds", async () => {
+  it("retries KWS_NO_ORG_CONTENT_PROVIDERS once and succeeds", async () => {
     (mockPost as any)
       .mockResolvedValueOnce({
         status: 403,
@@ -52,31 +52,15 @@ describe("aso-apple-popularity-client", () => {
         },
       })
       .mockResolvedValueOnce({
-        status: 403,
-        data: {
-          status: "error",
-          requestID: "req2",
-          error: {
-            errors: [
-              {
-                messageCode: "KWS_NO_ORG_CONTENT_PROVIDERS",
-                message: "No org content providers",
-              },
-            ],
-          },
-        },
-      })
-      .mockResolvedValueOnce({
         status: 200,
         data: { status: "success", data: [{ name: "z", popularity: 9 }] },
       });
 
-    const promise = requestPopularitiesWithKwsRetry(["z"], "cookie=value", "adam");
+    const promise = requestPopularitiesWithKwsRetry(["z"], "cookie=value", "adam", "US");
     await jest.advanceTimersByTimeAsync(1000);
-    await jest.advanceTimersByTimeAsync(2000);
     const result = await promise;
 
-    expect(mockPost).toHaveBeenCalledTimes(3);
+    expect(mockPost).toHaveBeenCalledTimes(2);
     expect(result.statusCode).toBe(200);
     expect(result.data.status).toBe("success");
   });
@@ -101,14 +85,13 @@ describe("aso-apple-popularity-client", () => {
     const promise = requestPopularitiesWithKwsRetry(
       ["z"],
       "cookie=value",
-      "adam"
+      "adam",
+      "US"
     );
     await jest.advanceTimersByTimeAsync(1000);
-    await jest.advanceTimersByTimeAsync(2000);
-    await jest.advanceTimersByTimeAsync(4000);
     const result = await promise;
 
-    expect(mockPost).toHaveBeenCalledTimes(4);
+    expect(mockPost).toHaveBeenCalledTimes(2);
     expect(result.statusCode).toBe(403);
     expect(result.data.error?.errors?.[0]?.messageCode).toBe(
       "KWS_NO_ORG_CONTENT_PROVIDERS"
@@ -132,7 +115,7 @@ describe("aso-apple-popularity-client", () => {
         data: { status: "success", data: [{ name: "z", popularity: 7 }] },
       });
 
-    const promise = requestPopularitiesWithKwsRetry(["z"], "cookie=value", "adam");
+    const promise = requestPopularitiesWithKwsRetry(["z"], "cookie=value", "adam", "US");
     await jest.advanceTimersByTimeAsync(2000);
     const result = await promise;
 
@@ -147,18 +130,113 @@ describe("aso-apple-popularity-client", () => {
     });
     (mockPost as any)
       .mockRejectedValueOnce(networkError)
-      .mockRejectedValueOnce(networkError)
       .mockResolvedValueOnce({
         status: 200,
         data: { status: "success", data: [{ name: "z", popularity: 5 }] },
       });
 
-    const promise = requestPopularitiesWithKwsRetry(["z"], "cookie=value", "adam");
+    const promise = requestPopularitiesWithKwsRetry(["z"], "cookie=value", "adam", "US");
     await jest.advanceTimersByTimeAsync(1000);
-    await jest.advanceTimersByTimeAsync(2000);
     const result = await promise;
 
-    expect(mockPost).toHaveBeenCalledTimes(3);
+    expect(mockPost).toHaveBeenCalledTimes(2);
     expect(result.statusCode).toBe(200);
+  });
+
+  it("does not retry when maxAttempts override is 1", async () => {
+    (mockPost as any).mockResolvedValue({
+      status: 503,
+      data: { status: "error", requestID: "req-no-retry" },
+    });
+
+    const result = await requestPopularitiesWithKwsRetry(
+      ["z"],
+      "cookie=value",
+      "adam",
+      "US",
+      { maxAttempts: 1 }
+    );
+
+    expect(mockPost).toHaveBeenCalledTimes(1);
+    expect(result.statusCode).toBe(503);
+  });
+});
+
+describe("requestPopularitiesWithKwsRetry country threading", () => {
+  beforeEach(() => (mockPost as any).mockReset());
+
+  it("posts storefronts: ['TR'] when country=TR", async () => {
+    (mockPost as any).mockResolvedValueOnce({
+      status: 200,
+      data: { data: [{ name: "altın", popularity: 12 }] },
+      headers: {},
+    });
+    await requestPopularitiesWithKwsRetry(
+      ["altın"],
+      "cookie",
+      "100",
+      "TR"
+    );
+    const body = (mockPost as any).mock.calls[0][1];
+    expect(body.storefronts).toEqual(["TR"]);
+  });
+
+  it("posts storefronts: ['US'] when country=US (backward compat)", async () => {
+    (mockPost as any).mockResolvedValueOnce({
+      status: 200,
+      data: { data: [{ name: "test", popularity: 5 }] },
+      headers: {},
+    });
+    await requestPopularitiesWithKwsRetry(
+      ["test"],
+      "cookie",
+      "100",
+      "US"
+    );
+    const body = (mockPost as any).mock.calls[0][1];
+    expect(body.storefronts).toEqual(["US"]);
+  });
+
+  it("returns popularity:null for all terms on KWS_NO_ORG_CONTENT_PROVIDERS when treatNoOrgAsNull=true", async () => {
+    (mockPost as any).mockResolvedValue({
+      status: 403,
+      data: {
+        error: { errors: [{ messageCode: "KWS_NO_ORG_CONTENT_PROVIDERS" }] },
+      },
+      headers: {},
+    });
+    const result = await requestPopularitiesWithKwsRetry(
+      ["a", "b"],
+      "cookie",
+      "100",
+      "TR",
+      { maxAttempts: 1, treatNoOrgAsNull: true }
+    );
+    expect(result.statusCode).toBe(200);
+    expect(result.data.data).toEqual([
+      { name: "a", popularity: null },
+      { name: "b", popularity: null },
+    ]);
+  });
+
+  it("keeps existing retry behavior when treatNoOrgAsNull is omitted (defaults to false)", async () => {
+    // existing US-style retry-on-no-org behavior. Apple returns 403, the loop should treat
+    // it as retryable (matches isTransientStatus). Exhaust attempts and return the 403.
+    (mockPost as any).mockResolvedValue({
+      status: 403,
+      data: {
+        error: { errors: [{ messageCode: "KWS_NO_ORG_CONTENT_PROVIDERS" }] },
+      },
+      headers: {},
+    });
+    const result = await requestPopularitiesWithKwsRetry(
+      ["a"],
+      "cookie",
+      "100",
+      "US",
+      { maxAttempts: 2 }
+    );
+    expect(result.statusCode).toBe(403);
+    expect(result.data.data).toBeUndefined();
   });
 });

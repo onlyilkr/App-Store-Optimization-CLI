@@ -11,6 +11,7 @@ export interface StoredOwnedApp {
   id: string;
   kind: OwnedAppKind;
   name: string;
+  projectId: string;
   averageUserRating: number | null;
   userRatingCount: number | null;
   previousAverageUserRating: number | null;

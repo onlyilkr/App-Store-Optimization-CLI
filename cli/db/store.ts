@@ -2,7 +2,19 @@ import * as fs from "fs";
 import * as path from "path";
 import Database from "better-sqlite3";
 import { ASO_ENV } from "../shared/aso-env";
+import {
+  DEFAULT_PROJECT_COLOR,
+  DEFAULT_PROJECT_ID,
+  DEFAULT_PROJECT_NAME,
+} from "../shared/project-types";
+import {
+  RESEARCH_APP_ID,
+  researchAppIdForProject,
+} from "../shared/aso-research";
+
 let db: Database.Database | null = null;
+
+const SKIP_RESEARCH_RENAME_ENV = "ASO_PROJECTS_SKIP_RESEARCH_RENAME";
 
 function ensureAppKeywordFavoriteColumn(database: Database.Database): void {
   const columns = database
@@ -14,6 +26,153 @@ function ensureAppKeywordFavoriteColumn(database: Database.Database): void {
       `ALTER TABLE app_keywords
        ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0`
     );
+  }
+}
+
+function ensureProjectsTable(database: Database.Database): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      color TEXT NOT NULL DEFAULT '${DEFAULT_PROJECT_COLOR}',
+      country TEXT NOT NULL DEFAULT 'US',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+}
+
+function ensureProjectsCountryColumn(database: Database.Database): void {
+  const columns = database
+    .prepare(`PRAGMA table_info(projects)`)
+    .all() as Array<{ name?: string }>;
+  const hasCountry = columns.some((c) => c.name === "country");
+  if (!hasCountry) {
+    database.exec(
+      `ALTER TABLE projects ADD COLUMN country TEXT NOT NULL DEFAULT 'US'`
+    );
+  }
+}
+
+function ensureDefaultProjectRow(database: Database.Database): void {
+  const now = new Date().toISOString();
+  database
+    .prepare(
+      `INSERT OR IGNORE INTO projects (id, name, color, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`
+    )
+    .run(
+      DEFAULT_PROJECT_ID,
+      DEFAULT_PROJECT_NAME,
+      DEFAULT_PROJECT_COLOR,
+      now,
+      now
+    );
+}
+
+function ensureProjectIdColumnOnOwnedApps(database: Database.Database): void {
+  const columns = database
+    .prepare(`PRAGMA table_info(owned_apps)`)
+    .all() as Array<{ name?: string }>;
+  const hasProjectIdColumn = columns.some(
+    (column) => column.name === "project_id"
+  );
+  if (!hasProjectIdColumn) {
+    // SQLite does not allow ADD COLUMN with REFERENCES+NOT NULL default.
+    // Referential integrity is enforced at the application layer in projects.ts
+    // (deleteProject cascades owned_apps rows manually).
+    database.exec(
+      `ALTER TABLE owned_apps
+         ADD COLUMN project_id TEXT NOT NULL DEFAULT '${DEFAULT_PROJECT_ID}'`
+    );
+  }
+}
+
+function ensureOwnedAppsProjectIndexes(database: Database.Database): void {
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_owned_apps_project
+      ON owned_apps(project_id, kind);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_owned_apps_research_per_project
+      ON owned_apps(project_id) WHERE kind = 'research';
+  `);
+}
+
+function ensureOwnedAppProjectMembershipsTable(
+  database: Database.Database
+): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS owned_app_project_memberships (
+      app_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      added_at TEXT NOT NULL,
+      PRIMARY KEY (app_id, project_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_owned_app_project_memberships_project
+      ON owned_app_project_memberships(project_id);
+    CREATE INDEX IF NOT EXISTS idx_owned_app_project_memberships_app
+      ON owned_app_project_memberships(app_id);
+  `);
+}
+
+function backfillOwnedAppProjectMemberships(
+  database: Database.Database
+): void {
+  const now = new Date().toISOString();
+  database
+    .prepare(
+      `INSERT OR IGNORE INTO owned_app_project_memberships (app_id, project_id, added_at)
+       SELECT id, project_id, ? FROM owned_apps WHERE project_id IS NOT NULL`
+    )
+    .run(now);
+}
+
+function migrateLegacyResearchAppId(database: Database.Database): void {
+  if (process.env[SKIP_RESEARCH_RENAME_ENV] === "1") return;
+  const legacy = database
+    .prepare(`SELECT id FROM owned_apps WHERE id = ?`)
+    .get(RESEARCH_APP_ID) as { id: string } | undefined;
+  if (!legacy) return;
+
+  const targetId = researchAppIdForProject(DEFAULT_PROJECT_ID);
+  const conflict = database
+    .prepare(`SELECT id FROM owned_apps WHERE id = ?`)
+    .get(targetId) as { id: string } | undefined;
+  if (conflict) return;
+
+  const fkPragma = database.pragma("foreign_keys", { simple: true });
+  const wasFkOn =
+    fkPragma === 1 || fkPragma === "1" || fkPragma === true;
+  if (wasFkOn) {
+    database.pragma("foreign_keys = OFF");
+  }
+  try {
+    const tx = database.transaction(() => {
+      database
+        .prepare(`UPDATE app_keywords SET app_id = ? WHERE app_id = ?`)
+        .run(targetId, RESEARCH_APP_ID);
+      database
+        .prepare(
+          `UPDATE owned_app_country_ratings SET app_id = ? WHERE app_id = ?`
+        )
+        .run(targetId, RESEARCH_APP_ID);
+      database
+        .prepare(
+          `UPDATE app_keyword_position_history SET app_id = ? WHERE app_id = ?`
+        )
+        .run(targetId, RESEARCH_APP_ID);
+      database
+        .prepare(
+          `UPDATE owned_apps
+             SET id = ?, project_id = ?
+           WHERE id = ?`
+        )
+        .run(targetId, DEFAULT_PROJECT_ID, RESEARCH_APP_ID);
+    });
+    tx();
+  } finally {
+    if (wasFkOn) {
+      database.pragma("foreign_keys = ON");
+    }
   }
 }
 
@@ -139,6 +298,14 @@ function initializeDatabase(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_aso_keyword_failures_country_stage
       ON aso_keyword_failures(country, stage);
   `);
+  ensureProjectsTable(database);
+  ensureProjectsCountryColumn(database);
+  ensureDefaultProjectRow(database);
+  ensureProjectIdColumnOnOwnedApps(database);
+  ensureOwnedAppsProjectIndexes(database);
+  migrateLegacyResearchAppId(database);
+  ensureOwnedAppProjectMembershipsTable(database);
+  backfillOwnedAppProjectMemberships(database);
   ensureAppKeywordFavoriteColumn(database);
   database.exec(`
     CREATE INDEX IF NOT EXISTS idx_app_keywords_country_app_favorite
@@ -168,4 +335,15 @@ export function closeDbForTests(): void {
   if (!db) return;
   db.close();
   db = null;
+}
+
+export function resetDbForTests(): void {
+  if (db) {
+    try {
+      db.close();
+    } catch {
+      // already closed
+    }
+    db = null;
+  }
 }
